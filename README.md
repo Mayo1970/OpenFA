@@ -1,6 +1,7 @@
 # OpenFA
 
-Open source engine that supports Kinder & Ferrero - Fresh Adventures. You need to own the game for OpenFA to play it.
+Open source engine that supports Kinder & Ferrero - Fresh Adventures. 
+You need to own the game for OpenFA to play it.
 
 ## Game status
 - [x] Loads assets
