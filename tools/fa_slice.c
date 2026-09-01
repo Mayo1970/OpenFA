@@ -14,11 +14,13 @@
  *   fa_slice --tone          keep the 440 Hz tone on (default: 1 s at start)
  *   fa_slice --silent        no startup tone
  *   fa_slice --frames N      run N frames headless and print stats
+ *   fa_slice --seed N        pin the enemy RNG (default: wall clock, RRR-57)
  *
  * Menu: this is the screen the real game opens on. Compare it to the oracle.
  * Level (--world N): arrows walk, A jump, S throw, D switch kid. Esc quits.
  *   P  toggle free-move (dev): fly through walls to reach the pickups; hold
  *      A while flying for a fast dash. Pickups and the boss gate still work.
+ *   I  skip straight to this world's boss arena (dev).
  *
  * GData lookup order: --gdata DIR, then <exe dir>/GData, then ./GData.
  */
@@ -46,6 +48,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 
 #if defined(_WIN32)
 #  define WIN32_LEAN_AND_MEAN
@@ -62,6 +65,7 @@ typedef struct {
     int       world;             /* 1..4: the world currently loaded     */
     int       in_end;            /* in the boss arena (WeltNE), not the world */
     int       end_pending;       /* recipe complete: load WeltNE next tick    */
+    int       boss_win_timer;    /* RRR-59: >0 counting down to CLASSIFICA    */
     int       tut_reload_pending;/* RRR-54: tutorial cleared - reload as WeltN */
     int       want_quit;
     char      gdata[600];
@@ -81,6 +85,12 @@ typedef struct {
     fa_player pl;
     int       use_player;
     int       freemove;         /* P toggle: fly through the level, no clip  */
+
+    /* RRR-57: the retail exe seeds the one rand() stream from the wall clock
+     * at start-up (0x42AE27). RRR-52 shipped a fixed default for replay. Here
+     * the slice seeds the enemy RNG from time() unless --seed N pins it. */
+    uint32_t  rng_seed;
+    int       rng_seed_set;
 
     /* RRR-53: health 0 -> the run ends. fa_death times the KO hold (240) +
      * fade (16); the level keeps running underneath. On DONE the level is
@@ -299,7 +309,7 @@ static void beh_voice(const char *rel_wav, void *ctx)
 {
     slice *s = (slice *)ctx;
     if (!rel_wav) return;
-    printf("Kinder Paradiso triggered -> %s\n", rel_wav);   /* console cue */
+    printf("voice -> %s\n", rel_wav);   /* console cue (Paradiso / boss) */
     if (s->audio) fa_audio_play_stream(s->audio, rel_wav, 17, 0);
 }
 
@@ -443,6 +453,7 @@ static void wire_level(slice *s)
         fa_beh_hooks hk = HK;
         hk.user = s;
         s->beh = fa_beh_create(s->ents, &hk);
+        fa_beh_seed(s->beh, s->rng_seed);   /* RRR-57: clock seed / --seed N */
         fa_beh_set_world(s->beh, s->world);
         fa_beh_set_character(s->beh, s->pl.character & 1);
     }
@@ -599,6 +610,7 @@ static void enter_world(slice *s, int world)
         s->world = world;
         s->in_end = 0;
         s->end_pending = 0;
+        s->boss_win_timer = 0;
         s->score = 0;               /* 0x41154C: a fresh run starts at 0 */
         if (s->audio && world >= 1 && world <= 4)
             fa_audio_event(s->audio, (fa_snd_event)(FA_SND_MUSIC_W1 + world - 1));
@@ -633,6 +645,7 @@ static void enter_end(slice *s)
         s->use_player = 1;
         s->in_end = 1;
         s->end_pending = 0;
+        s->boss_win_timer = 0;
         if (s->audio) fa_audio_event(s->audio, FA_SND_MUSIC_BOSS);
         fa_camera_init(&s->cam, FA_FB_W, FA_FB_H, s->map.world_w, s->map.world_h);
         wire_level(s);
@@ -660,7 +673,7 @@ static void enter_end(slice *s)
  * on it returns to the menu (the existing s->scores dismiss path, which now
  * also rebuilds the menu and zeroes the score).
  */
-static void begin_after_death(slice *s)
+static void begin_after_death(slice *s, int won)
 {
     if (s->audio) fa_audio_event(s->audio, FA_SND_MENU_MUSIC);   /* Start.wav */
 
@@ -671,6 +684,7 @@ static void begin_after_death(slice *s)
     s->use_player = 0;
     s->in_end = 0;
     s->end_pending = 0;
+    s->boss_win_timer = 0;
 
     s->scores = fa_hiscore_load(s->gdata);
     if (s->scores)
@@ -679,8 +693,8 @@ static void begin_after_death(slice *s)
         s->menu = fa_menu_load(s->gdata);                /* no assets: menu */
 
     fa_death_init(&s->death);
-    printf("run over (score %d) -> CLASSIFICA (Welt%d), then the menu\n",
-           s->score, s->world);
+    printf("%s (score %d) -> CLASSIFICA (Welt%d), then the menu\n",
+           won ? "World cleared - boss down" : "run over", s->score, s->world);
 }
 
 static int s_quit(void *user) { return ((slice *)user)->want_quit; }
@@ -783,6 +797,15 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             printf("free-move %s\n", s->freemove ? "ON" : "OFF");
         }
 
+        /* DEV: I skips straight to this world's boss arena (Welt<N>E) so a
+         * boss can be tested without replaying the whole level. */
+        if ((fi->dbg_pressed & FA_DBG_BOSS) && !s->in_end && !s->end_pending &&
+            s->world >= 1 && s->world <= 4) {
+            for (int i = 0; i < 6; i++) s->items[i] = 1;   /* recipe "complete" */
+            s->end_pending = 1;
+            printf("skip -> Welt%dE boss arena\n", s->world);
+        }
+
         /* RRR-53: the kid is dead. The run is over - but the LEVEL KEEPS
          * RUNNING for the 240-tick KO hold (exe case 1 / 0x41110B loops the
          * whole entity table with no death guard), then a 16-tick fade, then
@@ -792,7 +815,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
         if (fa_death_phase_of(&s->death) != FA_DEATH_ALIVE) {
             fa_death_tick(&s->death);
             if (fa_death_phase_of(&s->death) == FA_DEATH_DONE) {
-                begin_after_death(s);
+                begin_after_death(s, 0);
                 return;
             }
             if (s->beh) {
@@ -815,6 +838,17 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                 fa_cs_anim_set(&s->kid_anim[k], FA_CS_KO, s->pl.facing);
                 fa_cs_anim_tick(&s->kid_anim[k]);
             }
+            return;
+        }
+
+        /* RRR-59: the boss is down, its 7th recipe piece dropped, and the
+         * player has caught it (fa_beh beh_i7). The level is complete -
+         * to the CLASSIFICA / high-score screen (owner decision). */
+        if (s->in_end && s->beh && fa_beh_recipe_done(s->beh)) {
+            if (s->audio) fa_audio_event(s->audio, FA_SND_PICKUP);
+            printf("World %d complete (score %d) -> CLASSIFICA\n",
+                   s->world, s->score);
+            begin_after_death(s, 1);
             return;
         }
 
@@ -994,6 +1028,15 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             }
             if (s->hurt_cd > 0) s->hurt_cd--;
 
+            /* RRR-59: the boss is down - its 7th recipe piece drops in
+             * (fa_beh beh_i7); catch it to finish the level. */
+            if (s->in_end && s->beh && fa_beh_boss_defeated(s->beh) &&
+                !s->boss_win_timer) {
+                s->boss_win_timer = 1;          /* one-shot: log it once */
+                printf("boss defeated in Welt%dE (score %d) - catch the "
+                       "7th recipe piece\n", s->world, s->score);
+            }
+
             /* RRR-53: health hit 0 -> the run is over. Start the KO sequence
              * (exe 0x417419: player state -> KO, 0x4E0B44 = 0xF0). The exe
              * launches the body once (0x431A00/0x431A20: vx +/-18, vy -6, in
@@ -1143,10 +1186,16 @@ static void s_render(double alpha, uint16_t *fb, int w, int h, size_t pitch,
                     fa_fill(&dst, &b, NULL, fa_rgb565(150, 90, 40));
                 }
             }
-            /* RRR-51 AC5: the status panel, over the scene */
+            /* RRR-51 AC5 + RRR-59: the status panel over the scene. In the
+             * boss arena (exe hud_draw 0x408B9B, flag 0x45ECBC) the boss bar
+             * REPLACES the 6 recipe-piece icons - BossInterface frame + a
+             * Boss/Energy fill by HP + a Bosspics portrait. -1 boss_hp = the
+             * normal 6-icon HUD. */
+            int boss_hp = (s->in_end && s->beh) ? fa_beh_boss_hp(s->beh) : -1;
             if (s->hud)
                 fa_hud_render(s->hud, &dst, s->score, s->health, s->ammo,
-                              s->dirty_shot, s->items, s->pl.character);
+                              s->dirty_shot, s->items, s->pl.character,
+                              boss_hp, s->world - 1);
 
             /* RRR-53: the end-of-run fade (exe 0x45ED42 = 0x10, step 1). No
              * alpha blend on fa_surface, so a 16-step screen-door dissolve to
@@ -1293,6 +1342,7 @@ int main(int argc, char **argv)
     int show_credits = 0;
     double ov_g = 0, ov_j = 0, ov_j2 = 0, ov_r = 0, ov_a = 0;
     int ov_bw = 0, ov_bh = 0, ov_cx = 0, ov_cy = 0, ov_cb = 0;
+    long seed_arg = -1;              /* RRR-57: >=0 pins the enemy RNG seed */
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--frames") && i + 1 < argc)
@@ -1309,6 +1359,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--silent")) silent = 1;
         else if (!strcmp(argv[i], "--mute"))   mute = 1;
         else if (!strcmp(argv[i], "--vol") && i + 1 < argc) vol = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--seed") && i + 1 < argc) seed_arg = strtol(argv[++i], NULL, 0);
         else if (!strcmp(argv[i], "--gravity")   && i + 1 < argc) ov_g  = atof(argv[++i]);
         else if (!strcmp(argv[i], "--jumpvel")   && i + 1 < argc) ov_j  = atof(argv[++i]);
         else if (!strcmp(argv[i], "--jumpvel2")  && i + 1 < argc) ov_j2 = atof(argv[++i]);
@@ -1328,10 +1379,13 @@ int main(int argc, char **argv)
                    "ENDTITLES), then the menu\n"
                    "  a world with tut.ini byte 0 loads its tutorial (WeltNt) "
                    "automatically; --tut forces it\n"
-                   "  in a level: P toggles free-move (no-clip fly; hold A to dash)\n"
+                   "  in a level: P toggles free-move (no-clip fly; hold A to "
+                   "dash); I skips to this world's boss arena\n"
                    "  audio: with GData the real mixer plays music + voice "
                    "(--mute off, --vol 0..255); no GData -> a 440 Hz tone "
                    "(--tone keeps it, --silent off)\n"
+                   "  --seed N: pin the enemy RNG (default: wall clock, "
+                   "like the retail exe)\n"
                    "  physics tuning (px/tick): --gravity 0.6 --jumpvel 11 "
                    "--jumpvel2 9 --runspeed 5 --airaccel 1.2\n"
                    "    (--jumpvel = penguin, --jumpvel2 = Fettalatte; D switches)\n"
@@ -1353,6 +1407,10 @@ int main(int argc, char **argv)
     s.ov_runspeed = ov_r; s.ov_airaccel = ov_a;
     s.ov_bboxw = ov_bw; s.ov_bboxh = ov_bh;
     s.ov_camdzx = ov_cx; s.ov_camdzy = ov_cy; s.ov_cambias = ov_cb;
+    s.rng_seed_set = seed_arg >= 0;
+    s.rng_seed = s.rng_seed_set ? (uint32_t)seed_arg : (uint32_t)time(NULL);
+    printf("enemy rng seed: %u%s\n", s.rng_seed,
+           s.rng_seed_set ? " (--seed)" : " (clock)");
     fa_camera_init(&s.cam, FA_FB_W, FA_FB_H, FA_FB_W, FA_FB_H);
 
     find_gdata(gdata_arg, s.gdata, sizeof s.gdata);

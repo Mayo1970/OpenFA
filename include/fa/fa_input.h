@@ -48,6 +48,7 @@ struct fa_vfs;
 #define FA_DIK_D        32
 #define FA_DIK_F        33
 #define FA_DIK_P        25
+#define FA_DIK_I        23
 #define FA_DIK_SPACE    57
 #define FA_DIK_UP       200
 #define FA_DIK_LEFT     203

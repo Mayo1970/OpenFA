@@ -47,10 +47,16 @@ void fa_hud_free(fa_hud *h);
  *   dirty      non-zero selects the SchussD art (collect_dirtyballs, ObjNr 60)
  *   items      6 flags: items[i] != 0 shows recipe piece i+1 as collected
  *   character  0 penguin / 1 Milchschnitte - selects the Actors frame
+ *   boss_hp    RRR-59: >= 0 in a boss arena (exe flag 0x45ECBC). The boss bar
+ *              (Boss/BossInterface + Boss/Energy frame boss_hp + Boss/Bosspics
+ *              frame boss_pic) REPLACES the 6 recipe-piece icons. -1 = the
+ *              normal HUD.
+ *   boss_pic   which boss portrait: 0 gorilla / 1 yeti / 2 robot / 3 octopus
  */
 void fa_hud_render(const fa_hud *h, const struct fa_surface *dst,
                    int score, int health, int ammo, int dirty,
-                   const int items[6], int character);
+                   const int items[6], int character,
+                   int boss_hp, int boss_pic);
 
 #ifdef __cplusplus
 }

@@ -165,6 +165,22 @@ int fa_beh_projectiles_live(const fa_beh *b);
 int fa_beh_projectile(const fa_beh *b, int i, int *wx, int *wy, int *owner_obj);
 int fa_beh_boss_hp(const fa_beh *b);          /* -1 if no boss in the level */
 
+/*
+ * RRR-59: the World-1 gorilla boss (ObjNr 10, Welt1E). The boss is stationary
+ * and lobs coconuts (0x40C4E0 states 1/2/10, callback 0x40C2C0). A player
+ * snowball that strikes an incoming coconut sends it back (vx -> +/-9.0,
+ * vy -> -9.0); a returned coconut on the boss body is one accepted hit. Ten
+ * hits -> +10000 -> KO. `fa_beh_boss_defeated` is 1 once that KO has fired.
+ * The yeti (9) / robot (14) bosses are not implemented yet (RRR-60 / RRR-61);
+ * only the octopus (18) also takes a direct snowball.
+ */
+int fa_beh_boss_defeated(const fa_beh *b);
+
+/* RRR-59: 1 once the player has caught the 7th recipe piece (ObjNr 59) that
+ * drops when the World-1 boss is defeated. The host then ends the level
+ * (owner: -> the CLASSIFICA / high-score screen). */
+int fa_beh_recipe_done(const fa_beh *b);
+
 #ifdef __cplusplus
 }
 #endif

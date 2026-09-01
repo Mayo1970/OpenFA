@@ -77,7 +77,10 @@ struct fa_entity_store {
 /* generic faller physics (stop-gap until per-ObjNr AI, RRR-51) */
 #define FA_ENT_GRAVITY   72     /* 1/256 px per tick^2  (~0.28 px/tick^2) */
 #define FA_ENT_TERM_VY   (16 * 256)   /* terminal fall = 16 px/tick */
-#define FA_ENT_PICKUP_DELAY  5  /* extra ticks/frame for DetailGroup 1/2 bob */
+/* RRR-57: the pickup handlers set rec[0x10] = 2 in their state-0 init
+ * (collect_paradiso 0x40EE84, collect_energy 0x40EFB9 - both `mov [esi+0x10],2`),
+ * so a bob frame lasts base_delay(0) + 2 + 1 = 3 ticks. Was 5 (feel guess). */
+#define FA_ENT_PICKUP_DELAY  2  /* rec[0x10] for DetailGroup 1/2 pickups (exe) */
 
 /* --- directory listing (Scripts\*.jrs) --------------------------- */
 
@@ -841,7 +844,7 @@ int fa_entity_collect(fa_entity_store *s, int px, int py,
     int pl = px - half_w, pr = px + half_w, pt = py - half_h, pb = py + half_h;
     for (int i = 0; i < s->rec_count; i++) {
         fa_entity_rec *e = &s->rec[i];
-        if (e->active == 0) continue;
+        if (e->active == 0 || e->hidden) continue;
         if (e->detail_group != FA_AOM_DG_BONUS &&
             e->detail_group != FA_AOM_DG_POWERUP)
             continue;

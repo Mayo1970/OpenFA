@@ -41,6 +41,9 @@
 #define FX_1_0  65536
 #define FX_0_2  13107     /* 0.2  (block friction, 0x4522A0)  */
 #define FX_0_3  19661     /* 0.3  */
+#define FX_0_03 1966      /* 0.03 (coconut flat-throw gravity, 0x40C883)   */
+#define FX_0_5  32768     /* 0.5  (flat-coconut reflect vy, 0x40C331)      */
+#define FX_9_0  589824    /* 9.0  (reflected coconut speed, 0x40C318)      */
 #define FX_0_6  39322     /* 0.6  (gravity, PL-087)  */
 #define FX_7_0  458752    /* 7.0  (shove impulse, PL-135)     */
 #define FX_20_0 1310720   /* terminal fall (PL-087 / 0x452250) */
@@ -104,7 +107,7 @@ static const edesc DESC[] = {
 { 7,K_THROW,  1,3,1,  3,  40, 20, 40, 159,  50,600,-11,389, 19,-52, 56,240, 11, -3,  0},/*kl_yeti*/
 { 8,K_THROW,  1,1,1,  3,   8,  8, 48, 110,  65,600, 18,418, 32,-22, 66,176, 11, -3,  0},/*schneemann*/
 { 9,K_BOSS,   0,1,0,  0,  20, 20,134, 262,   0,  0,  0,  0,  0,  0,  0,  0,   0,  0,  9},/*yeti boss*/
-{10,K_BOSS,   0,1,0,  0,  70, 20,110, 262,   0,  0,  0,  0,  0,  0,  0,  0,   0,  0,  9},/*gorilla boss*/
+{10,K_BOSS,   0,3,0,  0,  70, 20,110, 262,   0,  0,  0,  0,  0,  0,  0,  0,   0,  0,  9},/*gorilla boss (andelay 3: exe 0x40C527)*/
 {11,K_CHARGE, 0,3,1,  3,  30, 10, 60, 198,  45,600,  8,408,  0,  0,  0,  0,   0,  0,  0},/*kl_roboter*/
 {12,K_THROW,  1,3,1,  3,  20, 20, 72, 155,  56,600, -5,395, 14,-17, 53,145, 11,  0,  0},/*eier_roboter*/
 {13,K_FLYROBOT,0,1,0, 0,   0, 40,  0,   0,   0,  0,  0,  0,  0,  0,  0,  0,   0,  0,  0},/*flugroboter*/
@@ -132,6 +135,8 @@ typedef struct {
     int     life;
     int     owner_obj;      /* the throwing enemy's ObjNr - the exe draws
                              * the projectile from that sheet (0x40AF80)  */
+    int     reflected;      /* RRR-59: a player snowball turned this boss
+                             * coconut back toward the boss (0x40C2C0)     */
 } bproj;
 
 struct fa_beh {
@@ -144,6 +149,8 @@ struct fa_beh {
 
     bproj proj[FA_BEH_MAX_PROJ];
     int   boss_hp;
+    int   boss_defeated;               /* RRR-59: the gorilla KO has fired    */
+    int   recipe_done;                 /* RRR-59: the 7th piece (i7) was taken */
     int   world;                       /* 1..4, for the Paradiso level cue  */
     int   pchar;                       /* active character 0/1 (0x4E1020)   */
     fa_rng rng;                        /* RRR-52: the shared enemy RNG stream */
@@ -163,6 +170,17 @@ static int brand(fa_beh *b, int n)
     return fa_rng_below(&b->rng, n);
 }
 
+/* RRR-59: the gorilla boss voice lines (0x40C4E0 / 0x40CC48 -> strings at
+ * 0x455E28..0x455D74). GB0002 intro/roar, GB0003 alt roar, GB0008..GB0011
+ * the four random on-hit taunts. Streamed on the Paradiso voice lane. */
+#define GB_INTRO "SDat/voices/ita/GB0002.wav"
+static const char *GB_ROAR[2]  = { "SDat/voices/ita/GB0002.wav",
+                                   "SDat/voices/ita/GB0003.wav" };
+static const char *GB_TAUNT[4] = { "SDat/voices/ita/GB0008.wav",
+                                   "SDat/voices/ita/GB0009.wav",
+                                   "SDat/voices/ita/GB0010.wav",
+                                   "SDat/voices/ita/GB0011.wav" };
+
 static int rec_index(const fa_beh *b, const fa_entity_rec *e)
 {
     const fa_entity_rec *base = fa_entity_at(b->store, 0);
@@ -172,6 +190,20 @@ static int rec_index(const fa_beh *b, const fa_entity_rec *e)
 static int overlap(int ax0,int ay0,int ax1,int ay1,int bx0,int by0,int bx1,int by1)
 {
     return !(ax1 < bx0 || ax0 > bx1 || ay1 < by0 || ay0 > by1);
+}
+
+/* RRR-59: the live boss record (ObjNr 9/10/14/18), or NULL. */
+static fa_entity_rec *boss_rec(fa_beh *b)
+{
+    int c = fa_entity_count(b->store);
+    for (int i = 0; i < c; i++) {
+        fa_entity_rec *e = fa_entity_at_mut(b->store, i);
+        if (!e || !e->active) continue;
+        if (e->obj_nr == 9 || e->obj_nr == 10 || e->obj_nr == 14 ||
+            e->obj_nr == 18)
+            return e;
+    }
+    return NULL;
 }
 
 static void player_box(const fa_beh *b, int *x0,int *y0,int *x1,int *y1)
@@ -257,6 +289,7 @@ static void spawn_proj(fa_beh *b, int owner_obj, int wx, int wy,
         b->proj[i].grav = grav;
         b->proj[i].life = life;
         b->proj[i].owner_obj = owner_obj;
+        b->proj[i].reflected = 0;          /* RRR-59: clear a reused slot     */
         if (b->h.sfx) b->h.sfx(FA_BEH_SFX_ENEMY_SHOT, owner_obj, b->h.user);
         return;
     }
@@ -749,17 +782,34 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
         e->anim_timer = d->andelay;
         e->automove = 1;
         e->flip_x = 0;
-        if (d->kind == K_BOSS) b->boss_hp = d->hp;
+        if (d->kind == K_BOSS) {
+            b->boss_hp = d->hp;
+            b->boss_defeated = 0;
+            e->automove = 0;                 /* the boss holds its ground     */
+            e->bs[BS_RT]  = 90 + brand(b, 120);  /* first idle before a throw */
+            e->bs[BS_RNG] = 300 + brand(b, 240); /* periodic-roar timer       */
+            if (e->obj_nr == 10) {           /* gorilla: intro speech first   */
+                e->bs[BS_LS] = 320;
+                e->flip_x = 0;               /* faces left, toward the kid    */
+                pd_range(e, 47, 51, 1);      /* speech gesture (exe 0x40C921) */
+                if (b->h.voice) b->h.voice(GB_INTRO, b->h.user);
+            }
+        }
         /* the exe body never terrain-probes; the RRR-50 one-time spawn snap
-         * stays as a placement fix for floating shipped data. */
-        if (b->h.terrain && d->kind != K_DIVE && d->kind != K_FLYROBOT) {
+         * stays as a placement fix for floating shipped data. Bosses are
+         * placed exactly by the arena data - snapping the tall gorilla sprite
+         * pushed it underground (RRR-59). */
+        if (b->h.terrain && d->kind != K_DIVE && d->kind != K_FLYROBOT &&
+            d->kind != K_BOSS) {
             int x0,y0,x1,y1, foot = e->y + 1;
             if (fa_entity_frame_box(b->store, idx, &x0,&y0,&x1,&y1) == 0) foot = y1;
             int drop = 0;
             while (drop < 224 && b->h.terrain(e->x, foot + drop, b->h.user) == 0) drop++;
             if (drop < 224) { e->y += drop; e->bs[BS_FY] = (int32_t)e->y << 16; }
         }
-        set_state(b, e, 0, 1);              /* Walk, forward               */
+        if (!(d->kind == K_BOSS && e->obj_nr == 10))
+            set_state(b, e, 0, 1);          /* Walk, forward (not the gorilla
+                                            * - it holds its intro pose)    */
         return 0;
     }
 
@@ -846,8 +896,11 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
     if (d->kind == K_BOSS) {
         int x0,y0,x1,y1;
         enemy_box(b, idx, e, d, &x0,&y0,&x1,&y1);
-        if (snow_hit(b, x0,y0,x1,y1)) {
-            if (d->tvy == 1) {              /* octopus: accepts the hit     */
+
+        /* --- octopus (Welt4E, ObjNr 18): the one boss a direct snowball
+         * hurts (0x40CD70 tvy path). 10 hits -> +10000 -> KO. --- */
+        if (d->tvy == 1) {
+            if (snow_hit(b, x0,y0,x1,y1)) {
                 if (--e->bs[BS_N] < 0) {
                     set_state(b, e, 18, 0);
                     e->bs[BS_LS] = 100; e->bs[BS_KT] = 120;
@@ -855,13 +908,118 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
                     if (b->h.score) b->h.score(10000, b->h.user);
                     if (b->h.sfx)   b->h.sfx(FA_BEH_SFX_BOSS_KO, e->obj_nr, b->h.user);
                     b->boss_hp = -1;
+                    b->boss_defeated = 1;
                 } else {
                     if (b->h.sfx) b->h.sfx(FA_BEH_SFX_BOSS_HIT, e->obj_nr, b->h.user);
                     b->boss_hp = e->bs[BS_N];
                 }
             }
-            /* yeti/gorilla/robot bounce it: consumed, no effect */
+            touch_player(b, x0,y0,x1,y1);
+            return 0;
         }
+
+        /* --- gorilla (Welt1E, ObjNr 10): stationary; lobs coconuts; hurt
+         * only by a coconut a snowball has turned back (see fa_beh_post).
+         * State machine traced to 0x40C4E0 (Codex-verified). The gorilla.jrs
+         * "Right" range 27..51 is one continuous sheet the exe plays in slices:
+         *   47..51 = the speech gesture (mouth), looped while a GB voice plays
+         *   27..38 = the chest-beat (exe caps rec[0xc] at 0x26 in 0x40C99D)
+         *   38..47 = the throw wind-up (exe sets rec[0xc] = 0x2f in state 2)
+         *   33..38 = the tight stationary idle sway (exe holds rec[0xa] at 33)
+         * States (ours -> exe):
+         *   320 speech  <- 50/51  : loop 47..51, wait for the voice, -> 330
+         *   330 chest    <- 0x40C99D tail : 27..38 x2, -> 340
+         *   340 idle     <- 1     : hold 33..38; RT -> 350; roar timer -> 320
+         *   350 wind-up  <- 2     : 38..47 once, -> 10
+         *    10 attack   <- 10    : Attack 72..86, coconut at frame 82
+         *                           (0x40C7F5), rec[6] = 3..6 bursts -> 340
+         *   300 hit      <- 100/101 : Freeze 53..63, then a GB0008..11 taunt
+         *                           speech -> 320 (exe -> state 50)
+         *   310 defeated <- 110   : KO 64..71, held. --- */
+        if (e->obj_nr == 10) {
+            e->flip_x = 0;                    /* always faces the kid (left)  */
+            switch (e->bs[BS_LS]) {
+            case 310:                        /* defeated: hold the KO frame  */
+                e->frame = e->anim_last;
+                return 0;
+
+            case 320:                        /* speech: loop 47..51 + voice  */
+                if (!b->h.voice_busy || !b->h.voice_busy(b->h.user)) {
+                    e->bs[BS_LS] = 330;
+                    e->bs[BS_KT] = 0;
+                    pd_range(e, 27, 38, 0);            /* -> chest-beat      */
+                }
+                touch_player(b, x0,y0,x1,y1);
+                return 0;
+
+            case 330:                        /* chest-beat: 27..38, twice    */
+                if (wrapped && ++e->bs[BS_KT] >= 2) {
+                    e->bs[BS_LS]  = 340;
+                    e->bs[BS_RT]  = 90 + brand(b, 120);
+                    e->bs[BS_RNG] = 300 + brand(b, 300);
+                    pd_range(e, 33, 38, 0);            /* -> idle sway       */
+                }
+                touch_player(b, x0,y0,x1,y1);
+                return 0;
+
+            case 350:                        /* wind-up: 38..47 once         */
+                if (wrapped) {
+                    e->bs[BS_LS] = 10;
+                    e->bs[BS_N]  = 3 + brand(b, 4);    /* rec[6] = 3..6      */
+                    e->bs[BS_AF] = 0;
+                    pd_range(e, 72, 86, 0);            /* Attack range       */
+                }
+                touch_player(b, x0,y0,x1,y1);
+                return 0;
+
+            case 300:                        /* took a hit: Freeze 53..63    */
+                if (wrapped) {                /* Freeze finished -> taunt     */
+                    if (b->h.voice) b->h.voice(GB_TAUNT[brand(b, 4)], b->h.user);
+                    e->bs[BS_LS] = 320;
+                    pd_range(e, 47, 51, 1);            /* speech (holds on it) */
+                }
+                touch_player(b, x0,y0,x1,y1);
+                return 0;
+
+            case 10:                         /* attack: throw at anim fr 82  */
+                /* the exe fires exactly on Attack frame 0x52 (0x40C7F5); the
+                 * coconut leaves the fully-extended arm - spawn rec-relative
+                 * rec.X-126 / rec.Y+60, vx ALWAYS -6.0 (no facing branch),
+                 * lob variant on rand()%1000 <= 500 (0x40C86D). */
+                if (e->frame == 82 && !e->bs[BS_AF]) {
+                    int lob = brand(b, 1000) <= 500;
+                    spawn_proj(b, 10, e->x - 126, e->y + 60, -6,
+                               lob ? -6 : 0, lob ? FX_0_3 : FX_0_03, 240);
+                    e->bs[BS_AF] = 1;
+                } else if (e->frame != 82) {
+                    e->bs[BS_AF] = 0;            /* re-arm for the next loop  */
+                }
+                if (wrapped && --e->bs[BS_N] <= 0) {
+                    e->bs[BS_LS] = 340;
+                    e->bs[BS_RT] = 90 + brand(b, 120);
+                    pd_range(e, 33, 38, 0);           /* back to idle sway   */
+                }
+                touch_player(b, x0,y0,x1,y1);
+                return 0;
+
+            default:                         /* 340 idle: stationary sway    */
+                if (--e->bs[BS_RT] <= 0) {
+                    e->bs[BS_LS] = 350;               /* -> wind-up         */
+                    pd_range(e, 38, 47, 0);
+                } else if (--e->bs[BS_RNG] <= 0 &&
+                           (!b->h.voice_busy || !b->h.voice_busy(b->h.user))) {
+                    /* periodic roar = a fresh speech + chest-beat pass       */
+                    if (b->h.voice) b->h.voice(GB_ROAR[brand(b, 2)], b->h.user);
+                    e->bs[BS_LS] = 320;
+                    pd_range(e, 47, 51, 1);
+                }
+                touch_player(b, x0,y0,x1,y1);
+                return 0;
+            }
+        }
+
+        /* yeti (9) / robot (14) bosses: not implemented yet (RRR-60 / 61).
+         * They bounce a direct snowball and only contact-damage. */
         touch_player(b, x0,y0,x1,y1);
         return 0;
     }
@@ -1065,6 +1223,68 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
     return 0;                              /* the callback owns movement    */
 }
 
+/* ================================================================
+ * i7 - the 7th recipe piece in the boss arena (ObjNr 59, 0x40F770)
+ * ================================================================
+ * The exe hides it above the screen (state 0 sets rec.Y = -200), holds until
+ * the boss-defeated flag ds:0x4DAB18 is set (state 1), then drops it straight
+ * down under gravity 0.6 (state 2) to land on the terrain (state 3). Catching
+ * it (0x41A3E0 overlap) awards +10000 and ends the level (owner: -> CLASSIFICA).
+ */
+enum { I7_WAIT, I7_FALL, I7_LAND };
+
+static int beh_i7(fa_entity_rec *e, int wrapped, void *ctx)
+{
+    (void)wrapped;
+    fa_beh *b = (fa_beh *)ctx;
+
+    if (!e->bs[BS_INIT]) {
+        e->bs[BS_INIT] = 1;
+        e->bs[BS_LS]   = I7_WAIT;
+        e->bs[BS_FY]   = (int32_t)e->y << 16;
+        e->bs[BS_VY]   = 0;
+        e->hidden      = 1;                 /* off-screen until the boss falls */
+        e->force_offscreen = 1;             /* keep this callback ticking      */
+        e->detail_group = -1;               /* this callback owns collection,
+                                             * not the generic pickup path    */
+        return 0;
+    }
+
+    if (e->bs[BS_LS] == I7_WAIT) {
+        if (b->boss_defeated) {
+            e->hidden = 0;
+            e->bs[BS_LS] = I7_FALL;
+        }
+        return 0;
+    }
+
+    if (e->bs[BS_LS] == I7_FALL) {
+        e->bs[BS_VY] += FX_0_6;
+        if (e->bs[BS_VY] > FX_20_0) e->bs[BS_VY] = FX_20_0;
+        e->bs[BS_FY] += e->bs[BS_VY];
+        e->y = fx_round(e->bs[BS_FY]);
+        if (b->h.terrain && b->h.terrain(e->x, e->y, b->h.user) == 1) {
+            e->bs[BS_VY] = 0;
+            e->bs[BS_LS] = I7_LAND;
+            e->force_offscreen = 0;
+        }
+    }
+
+    /* catch test - the whole player box vs a box around the piece */
+    {
+        int qx0,qy0,qx1,qy1;
+        player_box(b, &qx0,&qy0,&qx1,&qy1);
+        int hw = 40, hh = 40;
+        if (overlap(e->x - hw, e->y - hh, e->x + hw, e->y + hh,
+                    qx0,qy0,qx1,qy1)) {
+            if (b->h.score) b->h.score(10000, b->h.user);
+            b->recipe_done = 1;              /* host plays the jingle + ends   */
+            e->active = 0;
+        }
+    }
+    return 0;
+}
+
 /* ---- public API ---------------------------------------------- */
 
 fa_beh *fa_beh_create(fa_entity_store *store, const fa_beh_hooks *hooks)
@@ -1082,6 +1302,7 @@ fa_beh *fa_beh_create(fa_entity_store *store, const fa_beh_hooks *hooks)
         fa_entity_set_behaviour(store, BLOCK_OBJ[i], beh_block, b);
     fa_entity_set_behaviour(store, 77, beh_paradiso, b);   /* Kinder Paradiso */
     fa_entity_set_behaviour(store, 414, beh_broesel, b);   /* crumbling platform */
+    fa_entity_set_behaviour(store, 59, beh_i7, b);         /* boss-arena i7    */
     return b;
 }
 
@@ -1109,6 +1330,7 @@ void fa_beh_free(fa_beh *b)
         fa_entity_set_behaviour(b->store, BLOCK_OBJ[i], NULL, NULL);
     fa_entity_set_behaviour(b->store, 77, NULL, NULL);
     fa_entity_set_behaviour(b->store, 414, NULL, NULL);
+    fa_entity_set_behaviour(b->store, 59, NULL, NULL);
     free(b);
 }
 
@@ -1148,6 +1370,35 @@ void fa_beh_begin_frame(fa_beh *b, int feet_x, int feet_y,
 int fa_beh_post(fa_beh *b, int *knockback)
 {
     if (!b) { if (knockback) *knockback = 0; return 0; }
+
+    /* RRR-59: a player snowball that reaches an incoming boss coconut turns
+     * it back toward the boss (0x40C2C0: vx -> +/-9.0, vy -> -9.0). The
+     * snowball is consumed. */
+    for (int i = 0; i < FA_BEH_MAX_PROJ; i++) {
+        bproj *p = &b->proj[i];
+        if (!p->alive || p->owner_obj != 10 || p->reflected || !b->snow) continue;
+        if (p->vx >= 0) continue;                  /* 0x40C2E9: only vx < 0    */
+        int cx = p->x >> 16, cy = p->y >> 16;
+        for (int k = 0; k < b->snow_max; k++) {
+            struct fa_snowball *s = &b->snow[k];
+            if (!s->alive) continue;
+            int sx = s->x >> 16, sy = s->y >> 16;
+            if (sx < cx - 24 || sx > cx + 24 || sy < cy - 24 || sy > cy + 24)
+                continue;
+            s->alive = 0;
+            p->reflected = 1;
+            /* 0x40C318 / 0x40C328 / 0x40C331: vx -> +9.0; vy -> -9.0 when the
+             * coconut's own gravity > 0.1 (the lob variant, grav 0.3) else
+             * -0.5 (the flat variant, grav 0.03 - it skims back into the
+             * torso). Gravity is NOT changed by the reflect. */
+            p->vx = FX_9_0;
+            p->vy = (p->grav > FX_0_03) ? -FX_9_0 : -FX_0_5;
+            p->life = 120;
+            if (b->h.sfx) b->h.sfx(FA_BEH_SFX_BOSS_HIT, 10, b->h.user);
+            break;
+        }
+    }
+
     int px0,py0,px1,py1;
     player_box(b, &px0,&py0,&px1,&py1);
     for (int i = 0; i < FA_BEH_MAX_PROJ; i++) {
@@ -1160,7 +1411,45 @@ int fa_beh_post(fa_beh *b, int *knockback)
         int wx = p->x >> 16, wy = p->y >> 16;
         if (--p->life <= 0) { p->alive = 0; continue; }
         if (b->h.terrain && b->h.terrain(wx, wy, b->h.user) == 1) { p->alive = 0; continue; }
-        if (b->pif == 0 && wx >= px0 && wx <= px1 && wy >= py0 && wy <= py1) {
+
+        /* RRR-59: a turned-back coconut on the boss body is one accepted hit
+         * (0x40C338). Ten hits -> +10000 -> KO (0x40CB5B). */
+        if (p->reflected && p->owner_obj == 10) {
+            fa_entity_rec *bo = boss_rec(b);
+            if (bo && bo->obj_nr == 10 && bo->bs[BS_LS] != 300 &&
+                bo->bs[BS_LS] != 310) {
+                /* the exe torso box: boss.X + [0x46,0xB4], boss.Y + [0x14,0x11A]
+                 * (0x40C338..0x40C39C) - fixed, not the ballooning frame AABB */
+                int bx0 = bo->x + 70,  bx1 = bo->x + 180;
+                int by0 = bo->y + 20,  by1 = bo->y + 282;
+                if (wx >= bx0 && wx <= bx1 && wy >= by0 && wy <= by1) {
+                    p->alive = 0;
+                    if (--b->boss_hp < 0) {
+                        b->boss_hp = -1;
+                        b->boss_defeated = 1;
+                        bo->bs[BS_LS] = 310;
+                        bo->collision_enabled = 0;
+                        pd_range(bo, 64, 71, 0);        /* KO range 64..71   */
+                        if (b->h.score) b->h.score(10000, b->h.user);
+                        if (b->h.sfx)
+                            b->h.sfx(FA_BEH_SFX_BOSS_KO, 10, b->h.user);
+                    } else {
+                        /* hit: play the Freeze range, then state 300 does the
+                         * taunt speech + chest-beat + resume (exe 0x40C9F0 ->
+                         * 0x40CA7A -> taunt -> state 50). */
+                        bo->bs[BS_LS] = 300;
+                        pd_range(bo, 53, 63, 0);        /* Freeze 53..63     */
+                        if (b->h.sfx)
+                            b->h.sfx(FA_BEH_SFX_BOSS_HIT, 10, b->h.user);
+                    }
+                    continue;
+                }
+            }
+        }
+
+        /* an ordinary (not turned-back) projectile hurts the player on contact */
+        if (!p->reflected && b->pif == 0 &&
+            wx >= px0 && wx <= px1 && wy >= py0 && wy <= py1) {
             p->alive = 0;
             b->pending_dmg = 20;
             b->pending_kb  = 1;
@@ -1190,6 +1479,8 @@ int fa_beh_projectiles_live(const fa_beh *b)
 }
 
 int fa_beh_boss_hp(const fa_beh *b) { return b ? b->boss_hp : -1; }
+int fa_beh_boss_defeated(const fa_beh *b) { return b ? b->boss_defeated : 0; }
+int fa_beh_recipe_done(const fa_beh *b) { return b ? b->recipe_done : 0; }
 
 int fa_beh_push_carry(fa_beh *b, int probe_x, int probe_y)
 {

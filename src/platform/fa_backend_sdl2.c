@@ -74,6 +74,7 @@ static int sc_to_dik(SDL_Scancode sc)
     case SDL_SCANCODE_D:           return FA_DIK_D;
     case SDL_SCANCODE_F:           return FA_DIK_F;
     case SDL_SCANCODE_P:           return FA_DIK_P;   /* free-move toggle (dev) */
+    case SDL_SCANCODE_I:           return FA_DIK_I;   /* skip to the boss (dev) */
     case SDL_SCANCODE_LCTRL:       return 29;   /* DIK_LCONTROL */
     case SDL_SCANCODE_LSHIFT:      return 42;   /* DIK_LSHIFT   */
     case SDL_SCANCODE_LALT:        return 56;   /* DIK_LMENU    */

@@ -11,6 +11,7 @@ GData/
 # Smoking tests
 scratchpad/
 tests/
+build-and-test.sh
 
 #Tutorial files
 tut.ini

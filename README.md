@@ -11,17 +11,39 @@ You need to own the game for OpenFA to play it.
 - [ ] Boss fights
 - [ ] Scoreboard
 - [ ] Polish
-- [ ] Console ports
 
 ## Extras:
 - [ ] Controller support
 - [ ] Easier sprites converter
 - [ ] Level editor
 - [ ] Local co-op
+- [ ] Console ports
+
+## Additional options:
 - [ ] Widescreen support
+- [ ] Keys rebind
+- [ ] Hard mode
+- [ ] Super Hard mode 
+- [ ] Swap between old and new sound files for some actions
+- [ ] IT/DE dual audio
 
 
+## Why
+This engine was made in order to play *Kinder & Ferrero - Fresh Adventures* in modern computers as well as being able to be ported to modern platforms. Besides that, this project also aims to take this game up to modern standards, with Widescreen and Gamepad support.
 
+## Widescreen
+The game itself isn't meant to run in 16:9, even though the levels would benefit greatly from it. However, boss fights' arenas aren't fit for that format, so I need to think if I should keep the game letterboxed, or apply the letterbox in the boss arenas only due to limitations.
+
+## Hard mode and Super hard mode
+The game is moderately simple, It's not too difficult, but it could get frustrating at times. One of the "improvements" I'd like to add in future is a *Hard mode* and a *Super Hard mode*. Some enemies will throw between 1-3 projectiles randomly, however, in **Hard mode**, they can throw them between 1-5 times. This won't be applied to bosses. Not only that, but you will consume **twice** the ammos (the only weapon available in this game) but you will get a 1.5x score multiplier. In **Super Hard mode**, besides the changes you'll see in hard mode, Super Hard mode, the projectile change will also be applied to bosses and you will take **double** damage from all sources, but your score will have a 5x multiplier. *May be subject to changes*
+
+## Audio stuff
+This game had **two** releases: one with each level you could find separately (for a total of 4 CDs), and one with all the 4 levels alltogether, which came out one year after. Earlier versions had some sound files changed on the full pack, but the files are still available in the full release. Users can freely choose between the old and new files. Besides that, the game got released in Germany, Austria and Italy. This means that there's **two** dubs an user can choose from, assuming they have both language audios: German and Italian.
+
+## Known issues
+These issues will be addressed in the polish phase, but still worth noting.
+- Some background noises aren't placed properly
+- Some bosses don't have their behavior implemented yet.
 
 ## Build
 

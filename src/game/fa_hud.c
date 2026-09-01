@@ -37,6 +37,11 @@ struct fa_hud {
     hud_sheet item[6];    /* Item1..6.w01, 2 frames each */
     hud_sheet actors;     /* Actors.w01, 2 frames */
     hud_sheet digit;      /* Schrift.w01, 10 frames 0..9 */
+
+    /* RRR-59: the boss bar - swaps in for the 6 item icons in a boss arena */
+    hud_sheet boss_frame; /* Boss/BossInterface.w01, 1 frame */
+    hud_sheet boss_fill;  /* Boss/Energy.w01, 10 frames (one per HP)        */
+    hud_sheet boss_pic;   /* Boss/Bosspics.w01, 4 frames (one per boss)     */
 };
 
 /* Open the first path that exists (the shipped tree mixes case). */
@@ -122,6 +127,13 @@ fa_hud *fa_hud_load(const char *gdata_dir)
         snprintf(rel, sizeof rel, "%s/Item%d.w01", base, i + 1);
         sheet_load(&h->item[i], gdata_dir, rel);
     }
+    /* RRR-59: the boss bar sheets (optional - absent in a non-boss install) */
+    snprintf(rel, sizeof rel, "%s/Boss/BossInterface.w01", base);
+    sheet_load(&h->boss_frame, gdata_dir, rel);
+    snprintf(rel, sizeof rel, "%s/Boss/Energy.w01", base);
+    sheet_load(&h->boss_fill, gdata_dir, rel);
+    snprintf(rel, sizeof rel, "%s/Boss/Bosspics.w01", base);
+    sheet_load(&h->boss_pic, gdata_dir, rel);
     return h;
 }
 
@@ -135,6 +147,9 @@ void fa_hud_free(fa_hud *h)
     sheet_free(&h->actors);
     sheet_free(&h->digit);
     for (int i = 0; i < 6; i++) sheet_free(&h->item[i]);
+    sheet_free(&h->boss_frame);
+    sheet_free(&h->boss_fill);
+    sheet_free(&h->boss_pic);
     free(h);
 }
 
@@ -151,7 +166,8 @@ static int energy_frame(int health)
 
 void fa_hud_render(const fa_hud *h, const struct fa_surface *dst,
                    int score, int health, int ammo, int dirty,
-                   const int items[6], int character)
+                   const int items[6], int character,
+                   int boss_hp, int boss_pic)
 {
     if (!h || !dst || !dst->px) return;
 
@@ -169,13 +185,30 @@ void fa_hud_render(const fa_hud *h, const struct fa_surface *dst,
         sheet_draw(g, dst, f);
     }
 
-    /* 4. the 6 recipe pieces */
-    for (int i = 0; i < 6; i++) {
-        const hud_sheet *it = &h->item[i];
-        if (!it->n) continue;
-        int f = (items && items[i]) ? 1 : 0;
-        if (f > it->n - 1) f = it->n - 1;
-        sheet_draw(it, dst, f);
+    /* 4. the 6 recipe pieces - OR the boss bar in a boss arena (exe 0x408B9B:
+     * cmp 0x45ECBC,0 / jle -> the 6 icons; else BossInterface + Boss/Energy
+     * frame [0x45ED24] + Bosspics, each at its own origin). Mutually
+     * exclusive - the boss bar sits where the icons would. */
+    if (boss_hp >= 0) {
+        sheet_draw(&h->boss_frame, dst, 0);
+        if (h->boss_fill.n) {
+            int f = boss_hp;
+            if (f > h->boss_fill.n - 1) f = h->boss_fill.n - 1;
+            sheet_draw(&h->boss_fill, dst, f);
+        }
+        if (h->boss_pic.n) {
+            int f = boss_pic < 0 ? 0 : boss_pic;
+            if (f > h->boss_pic.n - 1) f = h->boss_pic.n - 1;
+            sheet_draw(&h->boss_pic, dst, f);
+        }
+    } else {
+        for (int i = 0; i < 6; i++) {
+            const hud_sheet *it = &h->item[i];
+            if (!it->n) continue;
+            int f = (items && items[i]) ? 1 : 0;
+            if (f > it->n - 1) f = it->n - 1;
+            sheet_draw(it, dst, f);
+        }
     }
 
     /* 5. the active-kid portrait */

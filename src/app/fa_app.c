@@ -82,6 +82,7 @@ int fa_app_run(const fa_platform_cfg *cfg, const fa_app_cbs *cbs,
         }
         actx.fi.btn_pressed = carry_pressed;
         if (fa_input_key_pressed(&in, FA_DIK_P)) carry_dbg |= FA_DBG_FREEMOVE;
+        if (fa_input_key_pressed(&in, FA_DIK_I)) carry_dbg |= FA_DBG_BOSS;
         actx.fi.dbg_pressed = carry_dbg;
 
         uint64_t now = pf.vt->now_ns(&pf);

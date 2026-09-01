@@ -42,11 +42,13 @@ typedef struct fa_frame_input {
     uint32_t btn_down;       /* bit b per held mouse button (b = 0..2)   */
     uint32_t btn_pressed;    /* bit b per button that went down this frame */
     uint32_t dbg_pressed;    /* debug-key down edges, carried until a tick
-                              * consumes them. bit 0 = FA_DBG_FREEMOVE (P). */
+                              * consumes them. bit 0 = FA_DBG_FREEMOVE (P),
+                              * bit 1 = FA_DBG_BOSS (I). */
 } fa_frame_input;
 
 /* Debug-key edge bits in fa_frame_input.dbg_pressed (dev tooling only). */
 #define FA_DBG_FREEMOVE  (1u << 0)   /* P: toggle free / no-clip movement */
+#define FA_DBG_BOSS      (1u << 1)   /* I: skip straight to the boss arena */
 
 typedef struct fa_app_cbs {
     /* One fixed 60 Hz tick. `input` points at a fa_frame_input. */
