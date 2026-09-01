@@ -36,4 +36,4 @@ The engine reads the original root folder at run time
 The decoders are linked in and run at load; path lookups apply the case/encoding normalisation.
 
 The engine refuses to start without a valid `GData` tree. Nothing in this
-repository contains or reproduces game assets.# OpenFA
+repository contains or reproduces game assets.
