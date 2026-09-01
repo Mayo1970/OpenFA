@@ -1,0 +1,1217 @@
+/*
+ * fa_beh.c - per-ObjNr enemy behaviour layer (RRR-51). See fa_beh.h.
+ *
+ * Rewritten from the raw disassembly (jr_disasm.txt) after the first
+ * parametrised pass diverged from the oracle. Every constant and state
+ * transition below is traced to a handler in the exe:
+ *
+ *   papagei  0x415FF0   adler   0x40A700   biene   0x40BBA0   (dive family)
+ *   kong     0x413CB0   kl_yeti 0x41B8B0   schneemann 0x41AA50
+ *   eier_rob 0x40FEB0   baer    0x40B1F0                      (throw family)
+ *   kl_rob   0x413450   (charge)   flugrob 0x4106C0 (2-axis)
+ *   schlange 0x41B3E0   kl_krake 0x412F70   (stationary contact)
+ *   yeti/gorilla/roboter/krake bosses 0x40E350/0x40C4E0/0x40D6B0/0x40CD70
+ *
+ * The shared updater 0x4335A0 advances rec[0x0e] within [rec[0x0a], rec[0x0c]]
+ * once every (base_delay + rec[0x10]) ticks (base_delay = level[0x1735] = 0).
+ * Each handler init sets rec[0x10] itself: 1 for the flyers, 3 for the ground
+ * enemies. fa_entity_tick reproduces that timer; this module sets
+ * anim_extra_delay per ObjNr so the cadence matches.
+ *
+ * Positions/velocities here are 16.16 fixed point (the exe uses float; the
+ * determinism contract forbids float in the sim). Enemy bodies do not probe
+ * terrain - they turn around at the record's stored min/max X only.
+ */
+#include "fa/fa_beh.h"
+#include "fa/fa_entity.h"
+#include "fa/fa_aom.h"
+#include "fa/fa_player.h"
+#include "fa/fa_rng.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+/* --- 16.16 fixed point --------------------------------------------- */
+#define FX      65536
+#define FX_2_0  131072
+#define FX_3_0  196608
+#define FX_6_0  393216
+#define FX_11_0 720896
+#define FX_12_0 786432
+#define FX_1_0  65536
+#define FX_0_2  13107     /* 0.2  (block friction, 0x4522A0)  */
+#define FX_0_3  19661     /* 0.3  */
+#define FX_0_6  39322     /* 0.6  (gravity, PL-087)  */
+#define FX_7_0  458752    /* 7.0  (shove impulse, PL-135)     */
+#define FX_20_0 1310720   /* terminal fall (PL-087 / 0x452250) */
+/* FX_2_0 (block gravity, 0x452288) is defined above. */
+
+static int fx_round(int32_t v)
+{
+    return v >= 0 ? (int)((v + FX / 2) >> 16)
+                  : -(int)(((-v) + FX / 2) >> 16);
+}
+
+/* --- per-record behaviour scratch (fa_entity_rec.bs[12]) ----------- */
+enum {
+    BS_LS = 0,   /* logic state: rec[0x62] in the exe.
+                  *   1  ROAM / patrol
+                  *   2  READY / IDLE (kong family only)
+                  *  10  ATTACK (dive / throw / charge)
+                  * 100  hit: play Freeze in place
+                  * 101  launched death
+                  * 200  spent - waiting for the anim wrap that removes it
+                  *   5  snowman frozen (thawing when it flips to mode 2)     */
+    BS_COOL,     /* rec[0x74] attack cooldown                                */
+    BS_RT,       /* rec[0x78] roam / idle phase timer                        */
+    BS_FX,       /* float X, 16.16                                           */
+    BS_FY,       /* float Y, 16.16                                           */
+    BS_VX,       /* float vx, 16.16                                          */
+    BS_VY,       /* float vy, 16.16                                          */
+    BS_N,        /* boss HP / throw-burst loop count                         */
+    BS_KT,       /* launched-death / freeze timer                            */
+    BS_AF,       /* per-loop "threw this loop already" latch / misc          */
+    BS_INIT,     /* 0 until the init state has run                           */
+    BS_RNG       /* reserved (was a per-record RNG; RRR-52 moved the draws to
+                  * the shared fa_rng stream, mirroring the exe's one stream) */
+};
+
+/* --- enemy descriptor -------------------------------------------- */
+enum { K_DIVE, K_THROW, K_CHARGE, K_STAND, K_FLYROBOT, K_BOSS };
+
+typedef struct {
+    short obj_nr;
+    unsigned char kind;
+    unsigned char cycle;     /* 1 = ROAM/READY alternation (kong family)  */
+    unsigned char andelay;   /* rec[0x10] anim_extra_delay                */
+    unsigned char patrol;    /* 1 = the body moves horizontally           */
+    short vx;                /* patrol speed, whole px/tick               */
+    short bx, by, bw, bh;    /* contact / vuln box rel (x,y); bw 0 = sprite */
+    short dcx, rng, ylo, yhi;/* attack gate                               */
+    short rel;               /* throw release: sheet frame                */
+    short tdx, tdy, tspan;   /* throw origin (facing left) + right span   */
+    short tvx, tvy;          /* projectile velocity, whole px/tick        */
+    short hp;                /* boss                                      */
+} edesc;
+
+/* Constants below are from the handler disassembly (see the file header). */
+static const edesc DESC[] = {
+/*obj kind     cyc del pat  vx   bx  by  bw   bh  dcx rng ylo yhi rel tdx tdy tspan tvx tvy hp */
+{ 3,K_DIVE,   0,1,1,  2,   0,  0, 60, 100,  40,180,300,500,  0,  0,  0,  0,   0,  0,  0},/*papagei*/
+{ 4,K_STAND,  0,1,0,  0,   5,  5, 25, 130,   0,  0,  0,  0,  0,  0,  0,  0,   0,  0,  0},/*schlange*/
+{ 5,K_THROW,  1,3,1,  3,  40, 20,120, 190, 107,600, 19,419, 26,-72, 76,330, 11, -3,  0},/*kong*/
+{ 6,K_DIVE,   0,1,1,  2,   0,130,180,  77,  90,180,300,500,  0,  0,  0,  0,   0,  0,  0},/*adler*/
+{ 7,K_THROW,  1,3,1,  3,  40, 20, 40, 159,  50,600,-11,389, 19,-52, 56,240, 11, -3,  0},/*kl_yeti*/
+{ 8,K_THROW,  1,1,1,  3,   8,  8, 48, 110,  65,600, 18,418, 32,-22, 66,176, 11, -3,  0},/*schneemann*/
+{ 9,K_BOSS,   0,1,0,  0,  20, 20,134, 262,   0,  0,  0,  0,  0,  0,  0,  0,   0,  0,  9},/*yeti boss*/
+{10,K_BOSS,   0,1,0,  0,  70, 20,110, 262,   0,  0,  0,  0,  0,  0,  0,  0,   0,  0,  9},/*gorilla boss*/
+{11,K_CHARGE, 0,3,1,  3,  30, 10, 60, 198,  45,600,  8,408,  0,  0,  0,  0,   0,  0,  0},/*kl_roboter*/
+{12,K_THROW,  1,3,1,  3,  20, 20, 72, 155,  56,600, -5,395, 14,-17, 53,145, 11,  0,  0},/*eier_roboter*/
+{13,K_FLYROBOT,0,1,0, 0,   0, 40,  0,   0,   0,  0,  0,  0,  0,  0,  0,  0,   0,  0,  0},/*flugroboter*/
+{14,K_BOSS,   0,1,0,  0,  70, 20,110, 262,   0,  0,  0,  0,  0,  0,  0,  0,   0,  0,  9},/*roboter boss*/
+{15,K_THROW,  1,3,1,  3,  10, 10, 68, 205, 107,600, 19,419, 47,-72, 76,245, 11, -3,  0},/*baer*/
+{16,K_DIVE,   0,1,1,  2,  10, 30, 68,  70,  44,180,300,500,  0,  0,  0,  0,   0,  0,  0},/*biene*/
+{17,K_STAND,  0,3,1,  3,  40,  0, 70,  90,   0,  0,  0,  0,  0,  0,  0,  0,   0,  0,  0},/*kl_krake*/
+{18,K_BOSS,   0,1,0,  0,  30, 10,170, 175,   0,  0,  0,  0,  0,  0,  0,  0,   0,  1,  9},/*krake boss (tvy=1: takes snowballs)*/
+};
+#define DESC_COUNT ((int)(sizeof DESC / sizeof DESC[0]))
+
+static const edesc *desc_for(int obj_nr)
+{
+    for (int i = 0; i < DESC_COUNT; i++)
+        if (DESC[i].obj_nr == obj_nr) return &DESC[i];
+    return NULL;
+}
+
+/* --- enemy-owned projectile pool -------------------------------- */
+#define FA_BEH_MAX_PROJ 24
+typedef struct {
+    int     alive;
+    int32_t x, y, vx, vy;   /* 16.16 */
+    int     grav;           /* 16.16 per tick (kong shots have none)     */
+    int     life;
+    int     owner_obj;      /* the throwing enemy's ObjNr - the exe draws
+                             * the projectile from that sheet (0x40AF80)  */
+} bproj;
+
+struct fa_beh {
+    fa_entity_store *store;
+    fa_beh_hooks     h;
+
+    int  px, py, phw, ph, pface, pif;   /* player snapshot (begin_frame)  */
+    struct fa_snowball *snow;
+    int  snow_max;
+
+    bproj proj[FA_BEH_MAX_PROJ];
+    int   boss_hp;
+    int   world;                       /* 1..4, for the Paradiso level cue  */
+    int   pchar;                       /* active character 0/1 (0x4E1020)   */
+    fa_rng rng;                        /* RRR-52: the shared enemy RNG stream */
+
+    int   pending_dmg, pending_kb;
+};
+
+/* ---- helpers --------------------------------------------------- */
+
+/*
+ * RRR-52: every random enemy timer draws from the behaviour layer's single
+ * fa_rng stream (the exe's rand(), fcn @0x4395B0), reduced with `% n` exactly
+ * as the handlers do. `brand(b, n)` == the exe's `rand() % n`.
+ */
+static int brand(fa_beh *b, int n)
+{
+    return fa_rng_below(&b->rng, n);
+}
+
+static int rec_index(const fa_beh *b, const fa_entity_rec *e)
+{
+    const fa_entity_rec *base = fa_entity_at(b->store, 0);
+    return base ? (int)(e - base) : 0;
+}
+
+static int overlap(int ax0,int ay0,int ax1,int ay1,int bx0,int by0,int bx1,int by1)
+{
+    return !(ax1 < bx0 || ax0 > bx1 || ay1 < by0 || ay0 > by1);
+}
+
+static void player_box(const fa_beh *b, int *x0,int *y0,int *x1,int *y1)
+{
+    *x0 = b->px - b->phw;  *x1 = b->px + b->phw;
+    *y0 = b->py - b->ph;   *y1 = b->py;
+}
+
+/*
+ * The enemy's contact / vulnerability box = the FULL rendered sprite AABB
+ * (RRR-51 owner playtest: "the hitbox should be the entire sprite"). The
+ * disassembly's tighter per-enemy sub-boxes (kong X+40,Y+20,120,190 etc.)
+ * are not what the oracle shows on screen. fa_entity_frame_box is now the
+ * exe-exact placed-object box (frame-0-normalised table A + ReferenceSprWidth
+ * mirror; see ent_frame_box), so the sprite and this box coincide.
+ */
+static void enemy_box(fa_beh *b, int idx, const fa_entity_rec *e,
+                      const edesc *d, int *x0,int *y0,int *x1,int *y1)
+{
+    if (fa_entity_frame_box(b->store, idx, x0, y0, x1, y1) != 0) {
+        int fw = 40, fh = 80;                 /* headless fallback */
+        *x0 = e->x - fw; *x1 = e->x + fw;
+        *y0 = e->y - fh; *y1 = e->y;
+    }
+
+    /* Flying enemies (dive family + flying robot): on the attack / dive
+     * frames the per-frame sprite AABB balloons well past the body (wings and
+     * beak spread, the dive pose stretches), so a raw-AABB contact box drifts
+     * off the visible enemy - the "disjointed hitbox" the owner reported.
+     * Intersect the AABB with the exe's fixed class box, anchored at the
+     * record origin (enemy-render-and-hit-disasm.md Q3). The result can never
+     * be larger than the drawn sprite and never detaches from it, in every
+     * state including the attack. */
+    if (d && (d->kind == K_DIVE || d->kind == K_FLYROBOT)) {
+        int cx0 = e->x + d->bx;
+        int cy0 = e->y + d->by;
+        int cx1 = d->bw > 0 ? cx0 + d->bw : *x1;
+        int cy1 = d->bh > 0 ? cy0 + d->bh : *y1;
+        if (cx0 < *x0) cx0 = *x0;
+        if (cy0 < *y0) cy0 = *y0;
+        if (cx1 > *x1) cx1 = *x1;
+        if (cy1 > *y1) cy1 = *y1;
+        if (cx1 > cx0 && cy1 > cy0) {
+            *x0 = cx0; *y0 = cy0; *x1 = cx1; *y1 = cy1;
+        }
+    }
+}
+
+/* pick an AOM range: which = 0 move[LEFT] (Walk) / 16 Attack / 17 Freeze / 18 KO */
+static const fa_aom_range *aom_range(fa_beh *b, const fa_entity_rec *e, int which)
+{
+    const fa_aom_def *def = fa_entity_def(b->store, e->obj_nr);
+    if (!def) return NULL;
+    switch (which) {
+        case 16: return &def->attack;
+        case 17: return &def->freeze;
+        case 18: return &def->ko;
+        default: return &def->move[FA_DIR_LEFT];
+    }
+}
+
+/* 0x430B20: load [start,end] into the anim range, reset the frame. */
+static void set_state(fa_beh *b, fa_entity_rec *e, int which, int mode)
+{
+    const fa_aom_range *r = aom_range(b, e, which);
+    if (!r || !r->set) return;
+    e->anim_first = r->start;
+    e->anim_last  = r->end < r->start ? r->start : r->end;
+    e->anim_mode  = mode;
+    e->frame      = (mode == 2) ? e->anim_last : e->anim_first;
+    e->anim_timer = e->anim_extra_delay;
+}
+
+/* fire one enemy projectile (0x40ADC0 constructor + 0x413B70 callback). */
+static void spawn_proj(fa_beh *b, int owner_obj, int wx, int wy,
+                       int vx, int vy, int grav, int life)
+{
+    for (int i = 0; i < FA_BEH_MAX_PROJ; i++) {
+        if (b->proj[i].alive) continue;
+        b->proj[i].alive = 1;
+        b->proj[i].x = (int32_t)wx << 16;  b->proj[i].y = (int32_t)wy << 16;
+        b->proj[i].vx = (int32_t)vx << 16; b->proj[i].vy = (int32_t)vy << 16;
+        b->proj[i].grav = grav;
+        b->proj[i].life = life;
+        b->proj[i].owner_obj = owner_obj;
+        if (b->h.sfx) b->h.sfx(FA_BEH_SFX_ENEMY_SHOT, owner_obj, b->h.user);
+        return;
+    }
+}
+
+/* consume the first player snowball whose point lands in the box; 1 = hit. */
+static int snow_hit(fa_beh *b, int x0,int y0,int x1,int y1)
+{
+    if (!b->snow) return 0;
+    for (int k = 0; k < b->snow_max; k++) {
+        struct fa_snowball *s = &b->snow[k];
+        if (!s->alive) continue;
+        int sx = s->x >> 16, sy = s->y >> 16;
+        if (sx < x0 || sx > x1 || sy < y0 || sy > y1) continue;
+        s->alive = 0;
+        return 1;
+    }
+    return 0;
+}
+
+/* 0x41A3E0: contact -> 20 damage, unless i-frames are up. */
+static void touch_player(fa_beh *b, int ex0,int ey0,int ex1,int ey1)
+{
+    if (b->pif != 0) return;
+    int qx0,qy0,qx1,qy1;
+    player_box(b, &qx0,&qy0,&qx1,&qy1);
+    if (overlap(ex0,ey0,ex1,ey1, qx0,qy0,qx1,qy1)) {
+        b->pending_dmg = 20;
+        b->pending_kb  = 1;
+    }
+}
+
+/* the shared KO award (0x4164xx): Freeze in place, then the launch. */
+static void enemy_ko(fa_beh *b, fa_entity_rec *e)
+{
+    e->anim_extra_delay = 1;                /* rec[0x10] = 1 on KO          */
+    set_state(b, e, 17, 0);                 /* state 0x11 = Freeze          */
+    e->bs[BS_LS] = 100;
+    e->bs[BS_KT] = 120;                     /* rec[0x74] fallback timer     */
+    e->automove = 0;
+    e->collision_enabled = 0;
+    if (b->h.score) b->h.score(100, b->h.user);
+    if (b->h.sfx)   b->h.sfx(FA_BEH_SFX_ENEMY_KO, e->obj_nr, b->h.user);
+}
+
+/* patrol one axis: X += vx (16.16), reverse at the record's min/max X. */
+static void patrol_x(fa_entity_rec *e, int lo, int hi)
+{
+    e->bs[BS_FX] += e->bs[BS_VX];
+    int nx = fx_round(e->bs[BS_FX]);
+    if (e->bs[BS_VX] > 0 && nx >= hi) { nx = hi; e->bs[BS_FX] = (int32_t)hi << 16; e->bs[BS_VX] = -e->bs[BS_VX]; }
+    if (e->bs[BS_VX] < 0 && nx <= lo) { nx = lo; e->bs[BS_FX] = (int32_t)lo << 16; e->bs[BS_VX] = -e->bs[BS_VX]; }
+    e->x = nx;
+    e->flip_x = e->bs[BS_VX] > 0;           /* rec[0x2b] = (vx > 0)         */
+}
+
+static int patrol_lo(const fa_entity_rec *e)
+{ return e->min_x != -1 ? e->min_x : (int)(e->bs[BS_FX] >> 16) - 200; }
+static int patrol_hi(const fa_entity_rec *e)
+{ return e->max_x != -1 ? e->max_x : (int)(e->bs[BS_FX] >> 16) + 200; }
+
+/*
+ * The attack gate, traced rec-relative to the exe (parrot 0x4161C0.. /
+ * kong 0x413EC5..). NOT sprite-box-relative - the exe compares the player
+ * against rec.X/rec.Y plus fixed offsets, so the anchor fix does not move it.
+ *
+ *   dive  (parrot): player well below (rec.Y + [ylo,yhi] = [+300,+500]) AND
+ *                   player X inside the patrol span (rec[0x1F]..rec[0x23]).
+ *   throw (kong):   |player_x - rec.X - dcx| < rng, on the facing side of
+ *                   rec.X + dcx, AND player_y in rec.Y + [ylo,yhi].
+ *
+ * Cooldown rec[0x74] zero and the rec[0x2A] bit-0 flag clear, as in the exe.
+ */
+static int attack_gate(fa_beh *b, fa_entity_rec *e, const edesc *d)
+{
+    if (e->bs[BS_COOL] != 0) return 0;
+    if ((e->raw[0x2a] & 1) != 0) return 0;
+
+    if (d->kind == K_DIVE) {
+        if (b->py <= e->y + d->ylo || b->py >= e->y + d->yhi) return 0;
+        int lo = patrol_lo(e), hi = patrol_hi(e);
+        if (b->px < lo || b->px > hi) return 0;
+        int dx = b->px - e->x;
+        return e->flip_x ? (dx > 0) : (dx < 0);
+    }
+
+    int cx  = e->x + d->dcx;                 /* range centre = rec.X + 0x6b   */
+    int hdx = b->px - cx;
+    int side = e->flip_x ? (hdx > 0) : (hdx < 0);
+    if (!side) return 0;
+    if ((hdx < 0 ? -hdx : hdx) >= d->rng) return 0;
+    if (b->py <= e->y + d->ylo || b->py >= e->y + d->yhi) return 0;
+    return 1;
+}
+
+/* ================================================================
+ * pushable block  (fcn.00414E50, ObjNr 76/78/86/87 - PL-135)
+ * ================================================================ */
+
+static const int BLOCK_OBJ[] = { 76, 78, 86, 87 };
+
+/* sparse leading-edge terrain test: samples along `span` at stride 32 plus
+ * the far endpoint (0x414D70 vertical / 0x414DE0 horizontal). */
+static int edge_solid(fa_beh *b, int ax, int ay, int dx, int dy, int span)
+{
+    if (!b->h.terrain) return 0;
+    if (b->h.terrain(ax + dx * (span - 1), ay + dy * (span - 1), b->h.user) == 1)
+        return 1;
+    for (int k = 0; k * 32 < span; k++)
+        if (b->h.terrain(ax + dx * (k * 32), ay + dy * (k * 32), b->h.user) == 1)
+            return 1;
+    return 0;
+}
+
+static int beh_block(fa_entity_rec *e, int wrapped, void *ctx)
+{
+    (void)wrapped;
+    fa_beh *b = (fa_beh *)ctx;
+    int idx = rec_index(b, e);
+    int x0, y0, x1, y1;
+    if (fa_entity_frame_box(b->store, idx, &x0, &y0, &x1, &y1) != 0) return 0;
+    int fw = x1 - x0, fh = y1 - y0;
+    if (fw < 2 || fh < 2) return 0;
+
+    if (!e->bs[BS_INIT]) {
+        e->bs[BS_INIT] = 1;
+        e->bs[BS_FX] = (int32_t)e->x << 16;
+        e->bs[BS_FY] = (int32_t)e->y << 16;
+        e->bs[BS_VX] = e->bs[BS_VY] = 0;
+        e->bs[BS_KT] = 0;                    /* rec[0x74] fall-scan counter  */
+        e->dx = e->dy = 0;
+        return 0;
+    }
+    int old_x = e->x, old_y = e->y;
+
+    /* friction toward 0 by 0.2 BEFORE integration, clamp on the sign cross */
+    if (e->bs[BS_VX] > 0) { e->bs[BS_VX] -= FX_0_2; if (e->bs[BS_VX] < 0) e->bs[BS_VX] = 0; }
+    else if (e->bs[BS_VX] < 0) { e->bs[BS_VX] += FX_0_2; if (e->bs[BS_VX] > 0) e->bs[BS_VX] = 0; }
+
+    /* gravity += 2.0, terminal 20.0 */
+    e->bs[BS_VY] += FX_2_0;
+    if (e->bs[BS_VY] > FX_20_0) e->bs[BS_VY] = FX_20_0;
+
+    /* --- swept vertical, one integer Y per step (0x414F28..0x414FB5) --- */
+    {
+        int cy = fx_round(e->bs[BS_FY]);
+        int ty = fx_round(e->bs[BS_FY] + e->bs[BS_VY]);
+        int landed = 0;
+        while (cy < ty) {
+            /* sparse bottom-edge test at candidateY + H */
+            if (edge_solid(b, x0, cy + fh, 1, 0, fw - 1)) {
+                if (e->bs[BS_KT] < 32) { e->bs[BS_VY] = 0; landed = 1; break; }
+                e->bs[BS_KT]++;             /* >= 32: ignore the surface     */
+            } else {
+                e->bs[BS_KT]++;            /* one iteration per crossed px   */
+            }
+            cy++;
+        }
+        (void)landed;
+        e->bs[BS_FY] = (int32_t)cy << 16;
+        e->y = cy;
+        y0 = cy; y1 = cy + fh;
+    }
+    if (e->bs[BS_KT] > 1000) { e->active = 0; return 0; }   /* lost in a pit */
+
+    /* --- swept horizontal, one integer X per step (0x415000..0x415118) --- */
+    if (e->bs[BS_VX] != 0) {
+        int step = e->bs[BS_VX] > 0 ? 1 : -1;
+        int cx = fx_round(e->bs[BS_FX]);
+        int tx = fx_round(e->bs[BS_FX] + e->bs[BS_VX]);
+        while (cx != tx) {
+            int nxt = cx + step;
+            int lead = step > 0 ? (nxt + fw) : nxt;
+            if (edge_solid(b, lead, y0, 0, 1, fh - 1)) { e->bs[BS_VX] = 0; break; }
+            cx = nxt;
+        }
+        e->bs[BS_FX] = (int32_t)cx << 16;
+        e->x = cx;
+    }
+
+    /* rec[0xB8]: keep updating off-screen while it still moves (0x4150AA) */
+    e->force_offscreen = (e->bs[BS_VX] != 0 || e->bs[BS_VY] != 0);
+    e->dx = e->x - old_x;                    /* for the fa_slice push carry  */
+    e->dy = e->y - old_y;
+    return 0;
+}
+
+/* ================================================================
+ * Kinder Paradiso  (ObjNr 77, misc_paradiso.w01, DetailGroup 4 - 0x415640)
+ * ================================================================
+ * NOT an enemy, never blocks or hurts the kid. The placement's rec[+0x2A]
+ * byte selects the behaviour (handler 0x415640, state-1 dispatch 0x415B70):
+ *
+ *   rec[+0x2A] == 10 : a NORMAL level. The mascot is ROPED. Frames from the
+ *     contact sheet: hold frame 5 (bound) -> kid approaches -> frames 6..14
+ *     ONCE (breaks free) -> loop frames 0..4 (mouth) for the whole world line
+ *     PA00NN.wav -> hold frame 0, latched. World line (ds:0x4DABD4):
+ *     1 PA0011, 2 PA0014, 3 PA0013, 4 PA0012.
+ *
+ *   rec[+0x2A] 0..9 : a TUTORIAL level (WeltNt). The mascot is ALREADY FREED
+ *     (no rope, no break-free): idle on frame 0, and on approach it loops the
+ *     mouth frames 0..4 for a PAT00NN.wav checkpoint line, then holds frame 0.
+ *     Every WeltNt places ~9 of these (rec[+0x2A] 0..8, sometimes 9) as you
+ *     walk the level. The line per rec[+0x2A] (0x415B70), some multi-part,
+ *     6/8 per active character:
+ *       0 pat0001,pat0002,pat0005   1 pat0006   2 pat0009,pat0010
+ *       3 pat0011   4 pat0012   5 pat0013   6 pat0015 / pat0017
+ *       7 pat0020 -> TUTORIAL COMPLETE   8 pat0018 / pat0019   9 pat0014
+ *     The rec[+0x2A] == 7 placement sits at the level exit; when its line ends
+ *     the exe sets tut.ini[world] = 1 and reloads the world as its normal
+ *     level (0x4159BD -> scene 20). fa_beh reports that via hooks.tutorial_done.
+ */
+static const char *paradiso_cue(int world)
+{
+    switch (world) {
+        case 1: return "SDat/voices/ita/PA0011.wav";
+        case 2: return "SDat/voices/ita/PA0014.wav";
+        case 3: return "SDat/voices/ita/PA0013.wav";
+        case 4: return "SDat/voices/ita/PA0012.wav";
+        default: return NULL;
+    }
+}
+
+/* rec[+0x2A] (0..9) + part index -> the PAT checkpoint line, or NULL past the
+ * end of the (usually one-element) sequence. `ch` = active character 0/1. */
+static const char *pat_seq(int rec2a, int part, int ch)
+{
+    switch (rec2a) {
+    case 0:
+        if (part == 0) return "SDat/voices/ita/pat0001.wav";
+        if (part == 1) return "SDat/voices/ita/pat0002.wav";
+        if (part == 2) return "SDat/voices/ita/pat0005.wav";
+        return NULL;
+    case 1: return part == 0 ? "SDat/voices/ita/pat0006.wav" : NULL;
+    case 2:
+        if (part == 0) return "SDat/voices/ita/pat0009.wav";
+        if (part == 1) return "SDat/voices/ita/pat0010.wav";
+        return NULL;
+    case 3: return part == 0 ? "SDat/voices/ita/pat0011.wav" : NULL;
+    case 4: return part == 0 ? "SDat/voices/ita/pat0012.wav" : NULL;
+    case 5: return part == 0 ? "SDat/voices/ita/pat0013.wav" : NULL;
+    case 6: return part == 0 ? (ch ? "SDat/voices/ita/pat0017.wav"
+                                   : "SDat/voices/ita/pat0015.wav") : NULL;
+    case 7: return part == 0 ? "SDat/voices/ita/pat0020.wav" : NULL;
+    case 8: return part == 0 ? (ch ? "SDat/voices/ita/pat0019.wav"
+                                   : "SDat/voices/ita/pat0018.wav") : NULL;
+    case 9: return part == 0 ? "SDat/voices/ita/pat0014.wav" : NULL;
+    }
+    return NULL;
+}
+
+enum { PD_WAIT = 0, PD_FREE = 1, PD_CUE = 2, PD_DONE = 3,
+       PDT_TALK = 4, PDT_DONE = 5 };
+
+/* set an explicit frame range directly (misc_paradiso needs 5, 6..14 and
+ * 0..4 - none is a plain AOM range). */
+static void pd_range(fa_entity_rec *e, int first, int last, int mode)
+{
+    e->anim_first = first;
+    e->anim_last  = last < first ? first : last;
+    e->anim_mode  = mode;
+    e->frame      = first;
+    e->anim_timer = e->anim_extra_delay;
+}
+
+static int beh_paradiso(fa_entity_rec *e, int wrapped, void *ctx)
+{
+    (void)wrapped;
+    fa_beh *b = (fa_beh *)ctx;
+    int idx = rec_index(b, e);
+    int tut = ((unsigned char)e->raw[0x2a] != 10);   /* 0..9 = a tutorial one */
+
+    if (!e->bs[BS_INIT]) {
+        e->bs[BS_INIT] = 1;
+        e->bs[BS_LS]   = PD_WAIT;
+        e->bs[BS_AF]   = 0;
+        e->automove = 0;
+        e->anim_extra_delay = 3;               /* rec[+0x10] = 3 (0x415703)  */
+        if (tut) pd_range(e, 0, 0, 0);          /* freed: hold frame 0 (0x11) */
+        else     pd_range(e, 5, 5, 0);          /* roped: hold frame 5 (0x0)  */
+        return 0;
+    }
+
+    switch (e->bs[BS_LS]) {
+
+    case PD_WAIT: {
+        int x0, y0, x1, y1;
+        if (fa_entity_frame_box(b->store, idx, &x0, &y0, &x1, &y1) != 0) {
+            x0 = x1 = e->x; y0 = y1 = e->y;
+        }
+        /* the exe's tight rec.Y + [-30, +100] band assumes a walk surface
+         * near the sprite top; not true for every placement, so trigger on
+         * the whole sprite AABB + a wide downward skirt. */
+        if (b->px <= x0 - 150 || b->px >= x1 + 150) return 0;
+        if (b->py <= y0 - 150 || b->py >= y1 + 250) return 0;
+
+        if (tut) {
+            const char *wav = pat_seq((unsigned char)e->raw[0x2a], 0, b->pchar);
+            if (wav && b->h.voice) b->h.voice(wav, b->h.user);
+            pd_range(e, 0, 4, 1);              /* mouth loop, Attack 0..4     */
+            e->bs[BS_AF] = 0;
+            e->bs[BS_KT] = 0;
+            e->bs[BS_LS] = PDT_TALK;
+        } else {
+            pd_range(e, 6, 14, 0);            /* break free 6..14 once        */
+            e->bs[BS_LS] = PD_FREE;
+        }
+        return 0;
+    }
+
+    case PD_FREE:                               /* normal level: break free   */
+        if (e->frame >= e->anim_last) {         /* reached frame 14           */
+            const char *wav = paradiso_cue(b->world);
+            if (wav && b->h.voice) b->h.voice(wav, b->h.user);
+            pd_range(e, 0, 4, 1);               /* mouth loop                 */
+            e->bs[BS_KT] = 0;
+            e->bs[BS_LS] = PD_CUE;
+        }
+        return 0;
+
+    case PD_CUE:                                /* normal level: the world line */
+        e->bs[BS_KT]++;
+        if ((e->bs[BS_KT] > 20 && b->h.voice_busy &&
+             !b->h.voice_busy(b->h.user)) || e->bs[BS_KT] > 1200) {
+            pd_range(e, 0, 0, 0);               /* hold frame 0, latched      */
+            e->bs[BS_LS] = PD_DONE;
+        }
+        return 0;
+
+    case PDT_TALK: {                            /* tutorial: a PAT line / chain */
+        e->bs[BS_KT]++;
+        int done = (e->bs[BS_KT] > 20 && b->h.voice_busy &&
+                    !b->h.voice_busy(b->h.user)) || e->bs[BS_KT] > 1800;
+        if (!done) return 0;
+        int next = e->bs[BS_AF] + 1;
+        const char *wav = pat_seq((unsigned char)e->raw[0x2a], next, b->pchar);
+        if (wav) {                             /* another part of the chain   */
+            if (b->h.voice) b->h.voice(wav, b->h.user);
+            e->bs[BS_AF] = next;
+            e->bs[BS_KT] = 0;
+            return 0;
+        }
+        /* the whole checkpoint line is done */
+        if ((unsigned char)e->raw[0x2a] == 7 && b->h.tutorial_done)
+            b->h.tutorial_done(b->h.user);      /* -> tut.ini + reload as WeltN */
+        pd_range(e, 0, 0, 0);                   /* freed: hold frame 0        */
+        e->bs[BS_LS] = PDT_DONE;
+        return 0;
+    }
+
+    default:                                    /* PD_DONE / PDT_DONE latched  */
+        return 0;
+    }
+}
+
+/* ================================================================
+ * Broeselplatform  (ObjNr 414, broeselplatform.w01, DetailGroup 0 - 0x416CB0)
+ * ================================================================
+ * A crumbling stand-on platform (11 of them in welt4 / the Phantasie world;
+ * the only map that places ObjNr 414). Handler 0x416CB0 is a 4-state machine
+ * on rec[0x62]:
+ *
+ *   0 IDLE  : solid, holds frame 0 - state-0 init (0x416CD0) zeroes the anim
+ *             range so it does NOT cycle its sheet. The common tail walks the
+ *             player list; when the kid stands on the deck (X in
+ *             [rec.X, rec.X + w], feet at rec.Y + rec[0x2A]) and the arm latch
+ *             rec[0x70] is 0, it sets rec[0x74] = 0x1E, rec[0x70] = 1,
+ *             rec[0x98] = 3.0 (a cosmetic pre-break bob) and rec[0x62] = 1.
+ *             Stepping off before it commits clears rec[0x70] (0x416E6C).
+ *   1 FUSE  : rec[0x74]-- each tick (0x416CEE). At 0: rec[0x1A] = 0 (drop
+ *             collision), rec[0x62] = 2, 0x430B20(rec, 0, 1) starts the break
+ *             sheet 0..8 once, 0x422B60(6, knusper.wav) is the crumble sfx.
+ *   2 BREAK : when the sheet reaches its last frame (0x416D34): rec[0xB9] = 1
+ *             (hide), rec[0x74] = 0x78, rec[0x62] = 3.
+ *   3 GONE  : rec[0x74]-- (0x416D66). At 0: rec[0x1A] = 1, rec[0xB9] = 0,
+ *             rec[0x62] = 0. rec[0x70] is NOT reset here, so if the kid is
+ *             still on the tile at regen it will not re-break until he leaves.
+ *
+ * The pre-break bob (rec[0x94]/rec[0x98]) is cosmetic and needs a per-record
+ * render offset the port entity has no field for - not reproduced (same
+ * omission as the Kinder Paradiso wobble). Collision is toggled through
+ * e->is_lift (fa_entity_solid_at / fa_entity_ride gate on it), so only this
+ * ObjNr is affected; e->collision_enabled is kept in step for consistency.
+ */
+enum { BR_IDLE = 0, BR_FUSE = 1, BR_BREAK = 2, BR_GONE = 3 };
+
+#define BR_FUSE_TICKS   30    /* rec[0x74] = 0x1E */
+#define BR_REGEN_TICKS  120   /* rec[0x74] = 0x78 */
+
+static int beh_broesel(fa_entity_rec *e, int wrapped, void *ctx)
+{
+    fa_beh *b = (fa_beh *)ctx;
+    int idx = rec_index(b, e);
+
+    if (!e->bs[BS_INIT]) {
+        e->bs[BS_INIT] = 1;
+        e->bs[BS_LS]   = BR_IDLE;
+        e->bs[BS_AF]   = 0;                 /* rec[0x70] arm latch          */
+        e->bs[BS_KT]   = 0;
+        e->automove = 0;
+        e->anim_extra_delay = 2;            /* rec[0x10] = 2 (0x416CE1)     */
+        pd_range(e, 0, 0, 0);               /* idle: hold frame 0, no anim  */
+        return 0;
+    }
+
+    switch (e->bs[BS_LS]) {
+
+    case BR_IDLE: {
+        int x0, y0, x1, y1;
+        if (fa_entity_frame_box(b->store, idx, &x0, &y0, &x1, &y1) != 0) {
+            /* frame 0 origin is (0,0), align-to-null is a no-op -> the box is
+             * exactly [rec.X, rec.X + 216] x [rec.Y, rec.Y + 78]. */
+            x0 = e->x; x1 = e->x + 216; y0 = e->y; y1 = e->y + 78;
+        }
+        int deck = y0 + e->collision_bottom_adjust;
+        int on = b->px + b->phw >= x0 && b->px - b->phw <= x1 &&
+                 b->py >= deck - FA_ENTITY_RIDE_SLOP &&
+                 b->py <= deck + FA_ENTITY_RIDE_SLOP;
+        if (on) {
+            if (!e->bs[BS_AF]) {
+                e->bs[BS_AF] = 1;
+                e->bs[BS_KT] = BR_FUSE_TICKS;
+                e->bs[BS_LS] = BR_FUSE;
+            }
+        } else {
+            e->bs[BS_AF] = 0;              /* stepped off -> re-armable     */
+        }
+        return 0;
+    }
+
+    case BR_FUSE:
+        if (--e->bs[BS_KT] <= 0) {
+            e->is_lift = 0;               /* rec[0x1A] = 0: no landing now  */
+            e->collision_enabled = 0;
+            pd_range(e, 0, 8, 0);         /* 0x430B20(rec,0,1): break 0..8  */
+            e->bs[BS_LS] = BR_BREAK;
+            if (b->h.sfx)
+                b->h.sfx(FA_BEH_SFX_BROESEL_BREAK, e->obj_nr, b->h.user);
+        }
+        return 0;
+
+    case BR_BREAK:
+        if (wrapped) {                     /* the 0..8 sheet finished       */
+            e->hidden = 1;                 /* rec[0xB9] = 1                  */
+            pd_range(e, 0, 0, 0);
+            e->bs[BS_KT] = BR_REGEN_TICKS;
+            e->bs[BS_LS] = BR_GONE;
+        }
+        return 0;
+
+    default:                              /* BR_GONE                        */
+        if (--e->bs[BS_KT] <= 0) {
+            e->is_lift = 1;               /* rec[0x1A] = 1: solid again     */
+            e->collision_enabled = 1;
+            e->hidden = 0;                /* rec[0xB9] = 0                  */
+            e->bs[BS_LS] = BR_IDLE;
+            /* BS_AF (rec[0x70]) left set on purpose: no re-break until the
+             * kid steps off and back on (matches 0x416D66). */
+        }
+        return 0;
+    }
+}
+
+/* ---- the enemy behaviour callback --------------------------- */
+
+static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
+{
+    fa_beh *b = (fa_beh *)ctx;
+    const edesc *d = desc_for(e->obj_nr);
+    if (!d) return 1;
+    int idx = rec_index(b, e);
+
+    /* --- init (rec[0x62] == 0) --- */
+    if (!e->bs[BS_INIT]) {
+        e->bs[BS_INIT] = 1;
+        e->bs[BS_FX] = (int32_t)e->x << 16;
+        e->bs[BS_FY] = (int32_t)e->y << 16;
+        e->bs[BS_VX] = -(int32_t)d->vx << 16;   /* vx = -speed (faces left) */
+        e->bs[BS_VY] = 0;
+        /* the exe inits rec[+0x78] = rec[+0x74] = 0 (kong 0x413D24, parrot
+         * 0x416056): state 1's timer hits 0 on the first tick, so the enemy
+         * snaps straight into READY and can attack once in range. The "too
+         * aggressive" the owner saw earlier was the flat (gravity-less)
+         * projectile, not the pacing - which is fixed now. */
+        e->bs[BS_RT]   = 0;
+        e->bs[BS_COOL] = 0;
+        e->bs[BS_LS] = 1;
+        e->bs[BS_N]  = d->hp;
+        e->anim_extra_delay = d->andelay;
+        e->anim_timer = d->andelay;
+        e->automove = 1;
+        e->flip_x = 0;
+        if (d->kind == K_BOSS) b->boss_hp = d->hp;
+        /* the exe body never terrain-probes; the RRR-50 one-time spawn snap
+         * stays as a placement fix for floating shipped data. */
+        if (b->h.terrain && d->kind != K_DIVE && d->kind != K_FLYROBOT) {
+            int x0,y0,x1,y1, foot = e->y + 1;
+            if (fa_entity_frame_box(b->store, idx, &x0,&y0,&x1,&y1) == 0) foot = y1;
+            int drop = 0;
+            while (drop < 224 && b->h.terrain(e->x, foot + drop, b->h.user) == 0) drop++;
+            if (drop < 224) { e->y += drop; e->bs[BS_FY] = (int32_t)e->y << 16; }
+        }
+        set_state(b, e, 0, 1);              /* Walk, forward               */
+        return 0;
+    }
+
+    if (e->bs[BS_COOL] > 0) e->bs[BS_COOL]--;
+    int lo = patrol_lo(e), hi = patrol_hi(e);
+
+    /* ============ hit / KO phases (0x4164C8 state 100, 0x41655B state 101) ==
+     * State 100: the Freeze range plays ONCE in place (automove already
+     * cleared), ~16 ticks at the anim delay of 1 the award set. When it
+     * reaches its last frame, state 101 begins.
+     * State 101: the body is launched - vy -12, +0.6/tick, terminal +20, vx
+     * +/-1 - for the FULL 120-tick rec[0x74] timer, with the frame PINNED at
+     * the last Freeze frame (the exe re-writes anim_timer=1 every tick at
+     * 0x4165E1 so the frame never advances/wraps, so the wrap-driven lifetime
+     * removal never fires). It arcs up then falls far off-screen, then is
+     * gone. The first pass removed it on the first anim wrap (~2 ticks) -
+     * that is the "wrong defeat timing" the owner reported. */
+    if (e->bs[BS_LS] == 100) {
+        if (e->frame >= e->anim_last) {
+            e->bs[BS_LS] = 101;
+            e->force_offscreen = 1;         /* rec[0xB8] = 1 (0x4164FE)      */
+            e->bs[BS_VX] = (e->flip_x ? FX_1_0 : -FX_1_0);
+            e->bs[BS_VY] = -FX_12_0;
+            e->bs[BS_KT] = 120;             /* rec[0x74] = 0x78              */
+            if (b->h.sfx) b->h.sfx(FA_BEH_SFX_ENEMY_LAUNCH, e->obj_nr, b->h.user);
+        }
+        return 0;
+    }
+    if (e->bs[BS_LS] == 101) {
+        e->bs[BS_VY] += FX_0_6;
+        if (e->bs[BS_VY] > FX_20_0) e->bs[BS_VY] = FX_20_0;
+        e->bs[BS_FX] += e->bs[BS_VX];
+        e->bs[BS_FY] += e->bs[BS_VY];
+        e->x = fx_round(e->bs[BS_FX]);
+        e->y = fx_round(e->bs[BS_FY]);
+        e->frame = e->anim_last;            /* pin the Freeze end frame      */
+        e->anim_timer = 1;
+        if (--e->bs[BS_KT] <= 0) e->bs[BS_LS] = 200;   /* -> state 0xC8       */
+        return 0;
+    }
+    if (e->bs[BS_LS] == 200) {
+        /* the 120 timer reached 0 last tick; the exe stays visible one more
+         * pass, then the anim wrap clears rec[+6] (0x4165C0..0x4165E1). */
+        e->frame = e->anim_last;
+        e->active = 0;
+        return 0;
+    }
+
+    /* ===== snowman frozen / thawing (0x41B095 state 100 / 0x41B0FE 101) =====
+     * The snowman does NOT die from a snowball - it falls over stiff, holds
+     * on the last Freeze frame for ~120 ticks, then plays the Freeze range
+     * BACKWARDS to stand up, then resumes. bs[BS_AF]: 0 falling, 1 held,
+     * 2 getting up. (Owner: it was looping the fall animation.) */
+    if (e->bs[BS_LS] == 5) {
+        if (e->bs[BS_AF] == 0) {              /* FALLING: Freeze 0..9 once   */
+            if (e->frame >= e->anim_last) {
+                e->frame = e->anim_last;
+                e->anim_first = e->anim_last; /* collapse -> hold last frame */
+                e->bs[BS_AF] = 1;
+            }
+            return 0;
+        }
+        if (e->bs[BS_AF] == 1) {              /* HELD DOWN: count rec[0x74]  */
+            if (--e->bs[BS_KT] <= 0) {
+                set_state(b, e, 17, 2);       /* Freeze reversed -> stand up */
+                e->bs[BS_AF] = 2;
+            }
+            return 0;
+        }
+        if (e->frame <= e->anim_first) {      /* GETTING UP done -> resume   */
+            e->bs[BS_LS] = 1;
+            e->bs[BS_AF] = 0;
+            e->bs[BS_RT] = 120 + brand(b, 120);
+            e->automove = 1;
+            e->anim_extra_delay = d->andelay;
+            e->bs[BS_VX] = (int32_t)d->vx << 16;   /* exe: vx = +3.0 (0x41B176) */
+            e->flip_x = 1;
+            set_state(b, e, 0, 1);
+        }
+        return 0;
+    }
+
+    /* ============ boss ============ */
+    if (d->kind == K_BOSS) {
+        int x0,y0,x1,y1;
+        enemy_box(b, idx, e, d, &x0,&y0,&x1,&y1);
+        if (snow_hit(b, x0,y0,x1,y1)) {
+            if (d->tvy == 1) {              /* octopus: accepts the hit     */
+                if (--e->bs[BS_N] < 0) {
+                    set_state(b, e, 18, 0);
+                    e->bs[BS_LS] = 100; e->bs[BS_KT] = 120;
+                    e->collision_enabled = 0;
+                    if (b->h.score) b->h.score(10000, b->h.user);
+                    if (b->h.sfx)   b->h.sfx(FA_BEH_SFX_BOSS_KO, e->obj_nr, b->h.user);
+                    b->boss_hp = -1;
+                } else {
+                    if (b->h.sfx) b->h.sfx(FA_BEH_SFX_BOSS_HIT, e->obj_nr, b->h.user);
+                    b->boss_hp = e->bs[BS_N];
+                }
+            }
+            /* yeti/gorilla/robot bounce it: consumed, no effect */
+        }
+        touch_player(b, x0,y0,x1,y1);
+        return 0;
+    }
+
+    /* ============ projectile hit -> one-hit KO (or snowman freeze) ====== */
+    {
+        int x0,y0,x1,y1;
+        enemy_box(b, idx, e, d, &x0,&y0,&x1,&y1);
+        if (e->bs[BS_LS] != 100 && e->bs[BS_LS] != 101 &&
+            snow_hit(b, x0,y0,x1,y1)) {
+            if (d->obj_nr == 8) {          /* snowman: freeze + thaw       */
+                e->anim_extra_delay = 1;   /* rec[0x10] = 1 (fast fall)    */
+                set_state(b, e, 17, 0);    /* Freeze 0..9 forward, frame 0 */
+                e->bs[BS_LS] = 5;
+                e->bs[BS_KT] = 120;        /* rec[0x74] hold timer         */
+                e->bs[BS_AF] = 0;          /* 0 = falling                  */
+                e->automove = 0;
+                if (b->h.sfx) b->h.sfx(FA_BEH_SFX_FREEZE, e->obj_nr, b->h.user);
+            } else {
+                enemy_ko(b, e);
+            }
+            return 0;
+        }
+    }
+
+    /* ============ movement + attack ============ */
+    switch (d->kind) {
+
+    case K_STAND:                          /* snake (still) / octopus (patrol) */
+        if (d->patrol) {
+            patrol_x(e, lo, hi);
+            /* small octopus ping-pongs its walk anim at both ends (0x413008) */
+            if (e->obj_nr == 17 && e->anim_last > e->anim_first) {
+                if (e->frame >= e->anim_last)  e->anim_mode = 2;
+                if (e->frame <= e->anim_first) e->anim_mode = 0;
+            }
+        }
+        break;
+
+    case K_FLYROBOT: {                     /* 2-axis accel flight          */
+        int ylo = e->min_y != -1 ? e->min_y : (int)(e->bs[BS_FY] >> 16) - 96;
+        int yhi = e->max_y != -1 ? e->max_y : (int)(e->bs[BS_FY] >> 16) + 96;
+        if (e->bs[BS_VX] == 0 && e->bs[BS_VY] == 0) { e->bs[BS_VX] = FX_0_3; e->bs[BS_VY] = FX_0_3; }
+        int ax = (e->x <= lo) ? FX_0_3 : (e->x >= hi) ? -FX_0_3 : (e->bs[BS_VX] > 0 ? FX_0_3 : -FX_0_3);
+        int ay = (e->y <= ylo) ? FX_0_3 : (e->y >= yhi) ? -FX_0_3 : (e->bs[BS_VY] > 0 ? FX_0_3 : -FX_0_3);
+        e->bs[BS_VX] += ax; e->bs[BS_VY] += ay;
+        int c5 = 5 * FX;
+        if (e->bs[BS_VX] >  c5) e->bs[BS_VX] =  c5;
+        if (e->bs[BS_VX] < -c5) e->bs[BS_VX] = -c5;
+        if (e->bs[BS_VY] >  c5) e->bs[BS_VY] =  c5;
+        if (e->bs[BS_VY] < -c5) e->bs[BS_VY] = -c5;
+        e->bs[BS_FX] += e->bs[BS_VX]; e->bs[BS_FY] += e->bs[BS_VY];
+        e->x = fx_round(e->bs[BS_FX]); e->y = fx_round(e->bs[BS_FY]);
+        e->flip_x = e->bs[BS_VX] > 0;
+        break;
+    }
+
+    case K_DIVE:
+        if (e->bs[BS_LS] == 10) {          /* diving                       */
+            e->bs[BS_VY] -= FX_0_3;
+            if (e->bs[BS_VY] < -FX_12_0) e->bs[BS_VY] = -FX_12_0;
+            e->bs[BS_FX] += e->bs[BS_VX];
+            e->bs[BS_FY] += e->bs[BS_VY];
+            e->x = fx_round(e->bs[BS_FX]);
+            int top = e->min_y != -1 ? e->min_y : (int)(e->bs[BS_FY] >> 16);
+            if (fx_round(e->bs[BS_FY]) <= top) {
+                e->bs[BS_FY] = (int32_t)top << 16;
+                e->y = top;
+                e->bs[BS_VY] = 0;
+                e->bs[BS_COOL] = 120;
+                e->bs[BS_LS] = 1;
+                set_state(b, e, 0, 1);
+            } else {
+                e->y = fx_round(e->bs[BS_FY]);
+            }
+            /* the dive sound is a CONTACT cue, not a launch telegraph: the exe
+             * plays it (0x422B60 id 3) from 0x40C2C0 only when the diver's
+             * box overlaps the player and bounces him (0x41A5E0), so it never
+             * sounds for an off-screen bird. Fire once per dive. */
+            if (!e->bs[BS_AF]) {
+                int hx0, hy0, hx1, hy1, qx0, qy0, qx1, qy1;
+                enemy_box(b, idx, e, d, &hx0, &hy0, &hx1, &hy1);
+                player_box(b, &qx0, &qy0, &qx1, &qy1);
+                if (overlap(hx0, hy0, hx1, hy1, qx0, qy0, qx1, qy1)) {
+                    e->bs[BS_AF] = 1;
+                    if (b->h.sfx)
+                        b->h.sfx(FA_BEH_SFX_ENEMY_ATTACK, e->obj_nr, b->h.user);
+                }
+            }
+            /* reverse vx at bounds while diving too */
+            if (e->bs[BS_VX] > 0 && e->x >= hi) e->bs[BS_VX] = -e->bs[BS_VX];
+            if (e->bs[BS_VX] < 0 && e->x <= lo) e->bs[BS_VX] = -e->bs[BS_VX];
+            e->flip_x = e->bs[BS_VX] > 0;
+        } else {
+            patrol_x(e, lo, hi);
+            if (attack_gate(b, e, d)) {
+                set_state(b, e, 16, 0);   /* Attack range                 */
+                e->bs[BS_VY] = FX_12_0;
+                e->bs[BS_LS] = 10;
+                e->bs[BS_AF] = 0;         /* arm the once-per-dive sound latch */
+            }
+        }
+        break;
+
+    case K_CHARGE:
+        if (e->bs[BS_LS] == 10) {          /* charging                     */
+            int spd = FX_6_0;
+            if (e->x - lo < 100 || hi - e->x < 100) spd = FX_3_0;
+            int dir = e->bs[BS_VX] < 0 ? -1 : 1;
+            e->bs[BS_FX] += dir * spd;
+            e->x = fx_round(e->bs[BS_FX]);
+            if (e->x <= lo || e->x >= hi) {
+                if (e->x < lo) { e->x = lo; e->bs[BS_FX] = (int32_t)lo << 16; }
+                if (e->x > hi) { e->x = hi; e->bs[BS_FX] = (int32_t)hi << 16; }
+                e->bs[BS_VX] = -e->bs[BS_VX];
+                e->bs[BS_LS] = 1;
+                set_state(b, e, 0, 1);
+            }
+            if (wrapped) { e->bs[BS_LS] = 1; set_state(b, e, 0, 1); }
+        } else {
+            patrol_x(e, lo, hi);
+            if (attack_gate(b, e, d)) {
+                set_state(b, e, 16, 0);
+                e->bs[BS_LS] = 10;
+                /* charge start: no telegraph sound in the exe */
+            }
+        }
+        break;
+
+    case K_THROW: {
+        int can_wrap = e->anim_last > e->anim_first;   /* false without a def */
+        if (e->bs[BS_LS] == 10) {          /* attack burst (0x413f12..)    */
+            /* release one projectile per loop on the release frame        */
+            int at_rel = can_wrap ? (e->frame == d->rel) : (e->bs[BS_KT] == 4);
+            if (at_rel && !e->bs[BS_AF]) {
+                e->bs[BS_AF] = 1;
+                int right = e->flip_x;
+                /* exe spawns rec-relative: kong 0x414171 rec.X-0x48 (+330 if
+                 * facing right) / rec.Y+0x4c.  DESC tdx/tdy/tspan. */
+                int ox = e->x + (right ? d->tspan + d->tdx : d->tdx);
+                int oy = e->y + d->tdy;
+                int vx = right ? d->tvx : -d->tvx;
+                /* 0x413B70: every enemy shot takes gravity +0.3 / terminal 20;
+                 * kong/yeti/snow/bear leave with vy -3, the egg with vy 0. */
+                spawn_proj(b, e->obj_nr, ox, oy, vx, d->tvy, FX_0_3, 120);
+            }
+            if (!at_rel) e->bs[BS_AF] = 0;
+            e->bs[BS_KT]++;
+            int loop_end = can_wrap ? wrapped : (e->bs[BS_KT] >= 20);
+            if (loop_end) {
+                e->bs[BS_KT] = 0;
+                if (--e->bs[BS_N] <= 0) {
+                    /* owner: the throw re-attacks too soon.  End the burst
+                     * into a full ROAM (not straight back to READY) and hold
+                     * a long cooldown so the next throw is a fresh cycle. */
+                    e->bs[BS_COOL] = 300;
+                    e->bs[BS_LS] = 1;
+                    e->bs[BS_RT] = 120 + brand(b, 120);
+                    set_state(b, e, 0, 1);
+                }
+            }
+        } else if (e->bs[BS_LS] == 1) {    /* ROAM (state 1, 0x413d50)     */
+            patrol_x(e, lo, hi);
+            if (--e->bs[BS_RT] <= 0) {
+                e->bs[BS_LS] = 2;
+                e->bs[BS_RT] = 60 + brand(b, 60);               /* 60..119 */
+            }
+        } else {                          /* READY (state 2, 0x413E84)     */
+            /* the exe keeps patrolling in READY (rec[+0x1C] stays 1 except at
+             * walk-frame 15) - it does NOT stand still.  Standing still was
+             * the "gets stuck when it changes direction" the owner saw. */
+            patrol_x(e, lo, hi);
+            if (--e->bs[BS_RT] <= 0) {
+                e->bs[BS_LS] = 1;
+                e->bs[BS_RT] = 120 + brand(b, 120);     /* 120..239 */
+                set_state(b, e, 0, 1);
+            } else if ((wrapped || !can_wrap) && attack_gate(b, e, d)) {
+                set_state(b, e, 16, 0);   /* 0x430b20(rec, 0x10, 1)        */
+                e->bs[BS_LS] = 10;
+                /* exe rec[+6] = 1 + rng%10; owner wants a shorter, more
+                 * deliberate burst - 1..3 shots. */
+                e->bs[BS_N]  = 1 + brand(b, 3);
+                e->bs[BS_AF] = 0;
+                e->bs[BS_KT] = 0;
+                /* no sound on the wind-up: the exe plays the whip per shot
+                 * (0x41416A), not on the attack-state entry. */
+            }
+        }
+        break;
+    }
+
+    default: break;
+    }
+
+    /* ============ contact damage (every non-KO tick) ============ */
+    {
+        int x0,y0,x1,y1;
+        enemy_box(b, idx, e, d, &x0,&y0,&x1,&y1);
+        touch_player(b, x0,y0,x1,y1);
+    }
+    return 0;                              /* the callback owns movement    */
+}
+
+/* ---- public API ---------------------------------------------- */
+
+fa_beh *fa_beh_create(fa_entity_store *store, const fa_beh_hooks *hooks)
+{
+    if (!store) return NULL;
+    fa_beh *b = (fa_beh *)calloc(1, sizeof *b);
+    if (!b) return NULL;
+    b->store = store;
+    if (hooks) b->h = *hooks;
+    b->boss_hp = -1;
+    fa_rng_seed(&b->rng, FA_BEH_RNG_DEFAULT_SEED);   /* RRR-52; fa_beh_seed overrides */
+    for (int i = 0; i < DESC_COUNT; i++)
+        fa_entity_set_behaviour(store, DESC[i].obj_nr, beh_enemy, b);
+    for (unsigned i = 0; i < sizeof BLOCK_OBJ / sizeof BLOCK_OBJ[0]; i++)
+        fa_entity_set_behaviour(store, BLOCK_OBJ[i], beh_block, b);
+    fa_entity_set_behaviour(store, 77, beh_paradiso, b);   /* Kinder Paradiso */
+    fa_entity_set_behaviour(store, 414, beh_broesel, b);   /* crumbling platform */
+    return b;
+}
+
+void fa_beh_set_world(fa_beh *b, int world)
+{
+    if (b) b->world = world;
+}
+
+void fa_beh_set_character(fa_beh *b, int character)
+{
+    if (b) b->pchar = character ? 1 : 0;
+}
+
+void fa_beh_seed(fa_beh *b, uint32_t seed)
+{
+    if (b) fa_rng_seed(&b->rng, seed);
+}
+
+void fa_beh_free(fa_beh *b)
+{
+    if (!b) return;
+    for (int i = 0; i < DESC_COUNT; i++)
+        fa_entity_set_behaviour(b->store, DESC[i].obj_nr, NULL, NULL);
+    for (unsigned i = 0; i < sizeof BLOCK_OBJ / sizeof BLOCK_OBJ[0]; i++)
+        fa_entity_set_behaviour(b->store, BLOCK_OBJ[i], NULL, NULL);
+    fa_entity_set_behaviour(b->store, 77, NULL, NULL);
+    fa_entity_set_behaviour(b->store, 414, NULL, NULL);
+    free(b);
+}
+
+int fa_beh_push(fa_beh *b, int probe_x, int probe_y, int facing)
+{
+    if (!b) return 0;
+    int c = fa_entity_count(b->store);
+    for (int i = 0; i < c; i++) {
+        fa_entity_rec *e = fa_entity_at_mut(b->store, i);
+        if (!e || !e->active || !e->is_block) continue;
+        int x0, y0, x1, y1;
+        if (fa_entity_frame_box(b->store, i, &x0, &y0, &x1, &y1) != 0) continue;
+        y0 += (int)(unsigned char)e->raw[0x2a];   /* contact-box top adjust  */
+        if (probe_x < x0 || probe_x >= x1 || probe_y < y0 || probe_y >= y1)
+            continue;                             /* half-open, PL-135       */
+        e->bs[BS_VX] = facing > 0 ? FX_7_0 : -FX_7_0;
+        return 1;
+    }
+    return 0;
+}
+
+void fa_beh_begin_frame(fa_beh *b, int feet_x, int feet_y,
+                        int half_w, int height, int facing, int iframes,
+                        struct fa_snowball *snow, int snow_max)
+{
+    if (!b) return;
+    b->px = feet_x; b->py = feet_y;
+    b->phw = half_w > 0 ? half_w : 40;
+    b->ph  = height > 0 ? height : 190;
+    b->pface = facing < 0 ? -1 : 1;
+    b->pif = iframes;
+    b->snow = snow; b->snow_max = snow_max;
+    b->pending_dmg = 0;
+    b->pending_kb  = 0;
+}
+
+int fa_beh_post(fa_beh *b, int *knockback)
+{
+    if (!b) { if (knockback) *knockback = 0; return 0; }
+    int px0,py0,px1,py1;
+    player_box(b, &px0,&py0,&px1,&py1);
+    for (int i = 0; i < FA_BEH_MAX_PROJ; i++) {
+        bproj *p = &b->proj[i];
+        if (!p->alive) continue;
+        p->vy += p->grav;
+        if (p->vy > FX_20_0) p->vy = FX_20_0;
+        p->x += p->vx;
+        p->y += p->vy;
+        int wx = p->x >> 16, wy = p->y >> 16;
+        if (--p->life <= 0) { p->alive = 0; continue; }
+        if (b->h.terrain && b->h.terrain(wx, wy, b->h.user) == 1) { p->alive = 0; continue; }
+        if (b->pif == 0 && wx >= px0 && wx <= px1 && wy >= py0 && wy <= py1) {
+            p->alive = 0;
+            b->pending_dmg = 20;
+            b->pending_kb  = 1;
+        }
+    }
+    if (knockback) *knockback = b->pending_kb;
+    return b->pending_dmg;
+}
+
+int fa_beh_enemies_alive(const fa_beh *b)
+{
+    if (!b) return 0;
+    int n = 0, c = fa_entity_count(b->store);
+    for (int i = 0; i < c; i++) {
+        const fa_entity_rec *e = fa_entity_at(b->store, i);
+        if (e && e->active && desc_for(e->obj_nr) && e->bs[BS_LS] < 100) n++;
+    }
+    return n;
+}
+
+int fa_beh_projectiles_live(const fa_beh *b)
+{
+    if (!b) return 0;
+    int n = 0;
+    for (int i = 0; i < FA_BEH_MAX_PROJ; i++) if (b->proj[i].alive) n++;
+    return n;
+}
+
+int fa_beh_boss_hp(const fa_beh *b) { return b ? b->boss_hp : -1; }
+
+int fa_beh_push_carry(fa_beh *b, int probe_x, int probe_y)
+{
+    if (!b) return 0;
+    int c = fa_entity_count(b->store);
+    for (int i = 0; i < c; i++) {
+        fa_entity_rec *e = fa_entity_at_mut(b->store, i);
+        if (!e || !e->active || !e->is_block) continue;
+        int x0, y0, x1, y1;
+        if (fa_entity_frame_box(b->store, i, &x0, &y0, &x1, &y1) != 0) continue;
+        y0 += (int)(unsigned char)e->raw[0x2a];
+        if (probe_x >= x0 && probe_x < x1 && probe_y >= y0 && probe_y < y1)
+            return e->dx;
+    }
+    return 0;
+}
+
+int fa_beh_projectile(const fa_beh *b, int i, int *wx, int *wy, int *owner_obj)
+{
+    if (!b || i < 0 || i >= FA_BEH_MAX_PROJ || !b->proj[i].alive) return 0;
+    if (wx) *wx = b->proj[i].x >> 16;
+    if (wy) *wy = b->proj[i].y >> 16;
+    if (owner_obj) *owner_obj = b->proj[i].owner_obj;
+    return 1;
+}

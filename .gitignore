@@ -1,0 +1,18 @@
+_build/
+dist/
+*.o
+*.a
+*.exe
+*.replay
+
+# never track game assets (RRR-100)
+GData/
+
+# Smoking tests
+scratchpad/
+tests/
+
+#Tutorial files
+tut.ini
+
+dist-README.txt
