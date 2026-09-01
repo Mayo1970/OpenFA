@@ -24,34 +24,11 @@ Open source engine that supports Kinder & Ferrero - Fresh Adventures. You need t
 
 ## Build
 
-No external dependencies for the core.
+Just run this.
 
 ```sh
-./build-and-test.sh          # clang by default; CC=gcc also works
+./make-windows-build.sh
 ```
-
-or with CMake:
-
-```sh
-cmake -B build && cmake --build build && ctest --test-dir build
-```
-
-## Layout
-
-```
-include/fa/      public engine headers (the RRR-33 abstraction contract)
-  fa_loop.h        fixed-timestep loop
-  fa_time.h        monotonic + wall clocks
-  fa_surface.h     RGB565 software surface + blitter (RRR-35)
-  fa_script.h      Lua 4.0 assignment-subset evaluator (RRR-36)
-  fa_aom.h         animated-object contract + runtime (RRR-37)
-  fa_res.h         resource lifetime + streaming policy (RRR-38)
-src/core/        platform-independent engine code
-src/platform/    one clock backend per OS (win32, posix; SDL/console later)
-tests/           core tests; refsim.h is a deterministic stand-in simulation
-tools/           sim_replay: headless deterministic driver (RRR-102 will use it)
-```
-
 ## Asset source
 
 The engine reads the original root folder at run time
