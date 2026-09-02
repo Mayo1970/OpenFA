@@ -4,14 +4,13 @@
  * Parity / design basis: ENGINE-ARCH section 7, RRR-14 (PL-031/032) and
  * RRR-23 (PL-071).
  *
- * Gameplay is keyboard only. The original polls a 256-entry DirectInput
- * keyboard-state array once per tick with zero buffered events (PL-031) and
+ * Gameplay still uses the original keyboard model: a 256-entry DirectInput
+ * keyboard-state array once per tick with zero buffered events (PL-031), and
  * derives "just pressed" by diffing the previous tick. This module keeps that
  * model exactly: a 256-byte current array and a 256-byte previous array,
  * indexed by DIK scancode, with the previous array taken once per frame by
- * fa_input_begin_frame(). Backends fill the current array - an SDL backend
- * translates SDL scancodes to DIK, a console backend maps face buttons to the
- * bound scancodes.
+ * fa_input_begin_frame(). SDL_GameController state is kept alongside it as a
+ * logical button/axis model, ready for the host to assign gameplay actions.
  *
  * The menu / front-end uses a pointer and button-DOWN edges only. The
  * original reads Win32 messages 512/513/515/516/256 and never handles
@@ -68,6 +67,36 @@ typedef enum {
     FA_ACT_COUNT
 } fa_action;
 
+/* SDL's GameController layer exposes these logical buttons independent of
+ * the physical layout (Xbox, PlayStation, Switch, etc.).  Keep the core free
+ * of SDL types so headless and console backends can feed the same model. */
+typedef enum {
+    FA_PAD_A = 0,
+    FA_PAD_B,
+    FA_PAD_X,
+    FA_PAD_Y,
+    FA_PAD_BACK,
+    FA_PAD_GUIDE,
+    FA_PAD_START,
+    FA_PAD_LEFTSTICK,
+    FA_PAD_RIGHTSTICK,
+    FA_PAD_LEFTSHOULDER,
+    FA_PAD_RIGHTSHOULDER,
+    FA_PAD_DPAD_UP,
+    FA_PAD_DPAD_DOWN,
+    FA_PAD_DPAD_LEFT,
+    FA_PAD_DPAD_RIGHT,
+    FA_PAD_BUTTON_COUNT
+} fa_pad_button;
+
+typedef enum {
+    FA_PAD_AXIS_LEFT_X = 0,
+    FA_PAD_AXIS_LEFT_Y,
+    FA_PAD_AXIS_RIGHT_X,
+    FA_PAD_AXIS_RIGHT_Y,
+    FA_PAD_AXIS_COUNT
+} fa_pad_axis;
+
 /* Option.ini lines 9-22: 8 controller slots + 4 aux u16 + SFX vol + music
  * vol (RRR-23). Preserved verbatim across a save. */
 #define FA_OPT_TAIL_LINES  14
@@ -76,11 +105,17 @@ typedef struct fa_input {
     unsigned char keys[256];
     unsigned char keys_prev[256];
 
+    unsigned char pad_buttons[FA_PAD_BUTTON_COUNT];
+    unsigned char pad_buttons_prev[FA_PAD_BUTTON_COUNT];
+    float         pad_axes[FA_PAD_AXIS_COUNT]; /* normalized -1..1 */
+    unsigned char pad_connected;
+
     int           ptr_x, ptr_y;
     unsigned char btn[3];
     unsigned char btn_prev[3];
 
     int           ptr_w, ptr_h;        /* pointer clamp box (default 800x600) */
+    unsigned char ptr_moved;            /* set by a feed during this frame */
     float         ptr_speed;           /* px / tick at full stick (default 8) */
     float         ptr_acc_x, ptr_acc_y;
 
@@ -107,6 +142,17 @@ void fa_input_begin_frame(fa_input *in);
 void fa_input_set_key(fa_input *in, int dik, int down);
 void fa_input_set_pointer(fa_input *in, int x, int y);
 void fa_input_set_button(fa_input *in, int btn, int down);   /* btn 0..2 */
+
+/* Feed the SDL-agnostic GameController state. Button and edge queries are
+ * useful to menus; gameplay mappings remain an explicit policy in the host. */
+void  fa_input_set_pad_connected(fa_input *in, int connected);
+void  fa_input_set_pad_button(fa_input *in, fa_pad_button btn, int down);
+void  fa_input_set_pad_axis(fa_input *in, fa_pad_axis axis, float value);
+int   fa_input_pad_connected(const fa_input *in);
+int   fa_input_pad_button_down(const fa_input *in, fa_pad_button btn);
+int   fa_input_pad_button_pressed(const fa_input *in, fa_pad_button btn);
+float fa_input_pad_axis(const fa_input *in, fa_pad_axis axis);
+int   fa_input_pointer_moved(const fa_input *in);
 
 /* --- console fallback (RRR-40 AC2) --------------------------------- */
 

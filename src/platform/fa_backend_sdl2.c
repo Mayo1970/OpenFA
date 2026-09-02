@@ -10,7 +10,8 @@
  *              integer-scaled RGB565 streaming texture, so the pixel output
  *              matches the original surface exactly (RRR-13).
  *   input      SDL scancodes -> DirectInput (DIK) codes for the keyboard
- *              array; mouse motion / buttons -> the menu pointer (RRR-40).
+ *              array; mouse motion / buttons -> the menu pointer (RRR-40);
+ *              SDL_GameController -> the platform-neutral pad state.
  *   audio      SDL_AudioDeviceID + SDL_QueueAudio, S16 stereo at 44100
  *              (RRR-30 output format). No callback thread; the loop pushes.
  *   timing     SDL_GetPerformanceCounter for now_ns, independent of vsync
@@ -50,12 +51,131 @@ typedef struct {
     SDL_Texture    *tex;
     int             tex_w, tex_h;
     SDL_AudioDeviceID audio;
+    SDL_GameController *pad;
+    SDL_JoystickID     pad_id;
+    int             controller_init;
     int             audio_ch;
     int             audio_rate;
     int             want_quit;
     Uint64          pf_freq;
     int             integer_scale;
 } sdl_state;
+
+static int pad_button_to_fa(SDL_GameControllerButton b)
+{
+    switch (b) {
+    case SDL_CONTROLLER_BUTTON_A:             return FA_PAD_A;
+    case SDL_CONTROLLER_BUTTON_B:             return FA_PAD_B;
+    case SDL_CONTROLLER_BUTTON_X:             return FA_PAD_X;
+    case SDL_CONTROLLER_BUTTON_Y:             return FA_PAD_Y;
+    case SDL_CONTROLLER_BUTTON_BACK:          return FA_PAD_BACK;
+    case SDL_CONTROLLER_BUTTON_GUIDE:         return FA_PAD_GUIDE;
+    case SDL_CONTROLLER_BUTTON_START:         return FA_PAD_START;
+    case SDL_CONTROLLER_BUTTON_LEFTSTICK:     return FA_PAD_LEFTSTICK;
+    case SDL_CONTROLLER_BUTTON_RIGHTSTICK:    return FA_PAD_RIGHTSTICK;
+    case SDL_CONTROLLER_BUTTON_LEFTSHOULDER:  return FA_PAD_LEFTSHOULDER;
+    case SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return FA_PAD_RIGHTSHOULDER;
+    case SDL_CONTROLLER_BUTTON_DPAD_UP:       return FA_PAD_DPAD_UP;
+    case SDL_CONTROLLER_BUTTON_DPAD_DOWN:     return FA_PAD_DPAD_DOWN;
+    case SDL_CONTROLLER_BUTTON_DPAD_LEFT:     return FA_PAD_DPAD_LEFT;
+    case SDL_CONTROLLER_BUTTON_DPAD_RIGHT:    return FA_PAD_DPAD_RIGHT;
+    default:                                   return -1;
+    }
+}
+
+static int pad_axis_to_fa(SDL_GameControllerAxis a)
+{
+    switch (a) {
+    case SDL_CONTROLLER_AXIS_LEFTX:  return FA_PAD_AXIS_LEFT_X;
+    case SDL_CONTROLLER_AXIS_LEFTY:  return FA_PAD_AXIS_LEFT_Y;
+    case SDL_CONTROLLER_AXIS_RIGHTX: return FA_PAD_AXIS_RIGHT_X;
+    case SDL_CONTROLLER_AXIS_RIGHTY: return FA_PAD_AXIS_RIGHT_Y;
+    default:                         return -1;
+    }
+}
+
+static void sdl_close_controller(sdl_state *s)
+{
+    if (s->pad) SDL_GameControllerClose(s->pad);
+    s->pad = NULL;
+    s->pad_id = (SDL_JoystickID)-1;
+}
+
+static int sdl_open_controller(sdl_state *s, int device_index)
+{
+    if (device_index < 0 || !SDL_IsGameController(device_index)) return -1;
+
+    SDL_GameController *pad = SDL_GameControllerOpen(device_index);
+    if (!pad) {
+        fprintf(stderr, "controller: SDL_GameControllerOpen(%d) failed: %s\n",
+                device_index, SDL_GetError());
+        return -1;
+    }
+
+    s->pad = pad;
+    s->pad_id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad));
+    fprintf(stderr, "controller: %s\n",
+            SDL_GameControllerName(pad) ? SDL_GameControllerName(pad) : "?");
+    return 0;
+}
+
+static void sdl_open_first_controller(sdl_state *s)
+{
+    for (int i = 0; i < SDL_NumJoysticks(); i++) {
+        if (sdl_open_controller(s, i) == 0) return;
+    }
+}
+
+static float axis_normalize(Sint16 raw)
+{
+    return raw < 0 ? (float)raw / 32768.0f : (float)raw / 32767.0f;
+}
+
+static void sdl_sync_controller(sdl_state *s, struct fa_input *in)
+{
+    static const SDL_GameControllerButton buttons[] = {
+        SDL_CONTROLLER_BUTTON_A, SDL_CONTROLLER_BUTTON_B,
+        SDL_CONTROLLER_BUTTON_X, SDL_CONTROLLER_BUTTON_Y,
+        SDL_CONTROLLER_BUTTON_BACK, SDL_CONTROLLER_BUTTON_GUIDE,
+        SDL_CONTROLLER_BUTTON_START, SDL_CONTROLLER_BUTTON_LEFTSTICK,
+        SDL_CONTROLLER_BUTTON_RIGHTSTICK, SDL_CONTROLLER_BUTTON_LEFTSHOULDER,
+        SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, SDL_CONTROLLER_BUTTON_DPAD_UP,
+        SDL_CONTROLLER_BUTTON_DPAD_DOWN, SDL_CONTROLLER_BUTTON_DPAD_LEFT,
+        SDL_CONTROLLER_BUTTON_DPAD_RIGHT
+    };
+    static const SDL_GameControllerAxis axes[] = {
+        SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY,
+        SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY
+    };
+
+    if (!in) return;
+    if (!s->pad || !SDL_GameControllerGetAttached(s->pad)) {
+        if (s->pad) sdl_close_controller(s);
+        fa_input_set_pad_connected(in, 0);
+        return;
+    }
+
+    fa_input_set_pad_connected(in, 1);
+    for (unsigned i = 0; i < sizeof buttons / sizeof buttons[0]; i++) {
+        int b = pad_button_to_fa(buttons[i]);
+        if (b >= 0)
+            fa_input_set_pad_button(in, (fa_pad_button)b,
+                                    SDL_GameControllerGetButton(s->pad, buttons[i]));
+    }
+    for (unsigned i = 0; i < sizeof axes / sizeof axes[0]; i++) {
+        int a = pad_axis_to_fa(axes[i]);
+        if (a >= 0)
+            fa_input_set_pad_axis(in, (fa_pad_axis)a,
+                                  axis_normalize(SDL_GameControllerGetAxis(s->pad,
+                                                                            axes[i])));
+    }
+
+    /* The left stick can act as the existing virtual menu pointer. The
+     * pointer is harmless during gameplay and remains useful to future UI. */
+    fa_input_stick(in,
+                   fa_input_pad_axis(in, FA_PAD_AXIS_LEFT_X),
+                   fa_input_pad_axis(in, FA_PAD_AXIS_LEFT_Y));
+}
 
 /* SDL scancode -> DIK. The keys the port binds (RRR-40), the common gameplay
  * set, and the full A-Z / 0-9 / space / '-' / '.' / Backspace range needed by
@@ -147,9 +267,18 @@ static int sdl_pump(fa_platform *p, struct fa_input *in)
                 fa_input_set_button(in, b, e.type == SDL_MOUSEBUTTONDOWN);
             break;
         }
+        case SDL_CONTROLLERDEVICEADDED:
+            if (s->controller_init && !s->pad)
+                (void)sdl_open_controller(s, e.cdevice.which);
+            break;
+        case SDL_CONTROLLERDEVICEREMOVED:
+            if (s->pad && e.cdevice.which == s->pad_id)
+                sdl_close_controller(s);
+            break;
         default: break;
         }
     }
+    sdl_sync_controller(s, in);
     return s->want_quit;
 }
 
@@ -224,6 +353,7 @@ static void sdl_shutdown(fa_platform *p)
 {
     sdl_state *s = (sdl_state *)p->impl;
     if (s) {
+        sdl_close_controller(s);
         if (s->audio) SDL_CloseAudioDevice(s->audio);
         if (s->tex)   SDL_DestroyTexture(s->tex);
         if (s->ren)   SDL_DestroyRenderer(s->ren);
@@ -231,7 +361,8 @@ static void sdl_shutdown(fa_platform *p)
         free(s);
     }
     p->impl = NULL;
-    SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS |
+                      SDL_INIT_GAMECONTROLLER);
     if (!SDL_WasInit(0)) SDL_Quit();
 }
 
@@ -259,6 +390,7 @@ int fa_backend_sdl2_create(fa_platform *p, const fa_platform_cfg *cfg)
     if (!s) { SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS); return -1; }
     s->pf_freq = SDL_GetPerformanceFrequency();
     if (s->pf_freq == 0) s->pf_freq = 1;
+    s->pad_id = (SDL_JoystickID)-1;
     s->integer_scale = cfg ? cfg->integer_scale : 0;
 
     Uint32 wflags = SDL_WINDOW_RESIZABLE |
@@ -279,6 +411,14 @@ int fa_backend_sdl2_create(fa_platform *p, const fa_platform_cfg *cfg)
     /* No SDL_RenderSetLogicalSize: sdl_present / map_pointer do their own
      * letterbox math in real output pixels. Setting a logical size here made
      * SDL transform those coords a second time -> tiny, off-centre image. */
+
+    if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) == 0) {
+        s->controller_init = 1;
+        sdl_open_first_controller(s);
+    } else {
+        fprintf(stderr, "controller: SDL_INIT_GAMECONTROLLER failed: %s\n",
+                SDL_GetError());
+    }
 
     if (cfg && cfg->want_audio) {
         SDL_AudioSpec want, have;
@@ -323,10 +463,12 @@ int fa_backend_sdl2_create(fa_platform *p, const fa_platform_cfg *cfg)
     return 0;
 
 fail:
+    sdl_close_controller(s);
     if (s->ren) SDL_DestroyRenderer(s->ren);
     if (s->win) SDL_DestroyWindow(s->win);
     free(s);
-    SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS |
+                      SDL_INIT_GAMECONTROLLER);
     return -1;
 }
 

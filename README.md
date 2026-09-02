@@ -13,7 +13,7 @@ You need to own the game for OpenFA to play it.
 - [ ] Polish
 
 ## Extras:
-- [ ] Controller support
+- [x] Controller support
 - [ ] Easier sprites converter
 - [ ] Level editor
 - [ ] Local co-op

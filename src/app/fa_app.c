@@ -31,6 +31,26 @@ static uint32_t actions_of(const fa_input *in)
     return m;
 }
 
+static uint32_t action_edges_of(const fa_input *in)
+{
+    uint32_t m = 0;
+    for (int a = 0; a < FA_ACT_COUNT; a++)
+        if (fa_input_action_pressed(in, (fa_action)a)) m |= (1u << a);
+    return m;
+}
+
+static uint32_t pad_buttons_of(const fa_input *in, int pressed)
+{
+    uint32_t m = 0;
+    for (int b = 0; b < FA_PAD_BUTTON_COUNT; b++) {
+        int down = pressed
+                 ? fa_input_pad_button_pressed(in, (fa_pad_button)b)
+                 : fa_input_pad_button_down(in, (fa_pad_button)b);
+        if (down) m |= (1u << b);
+    }
+    return m;
+}
+
 int fa_app_run(const fa_platform_cfg *cfg, const fa_app_cbs *cbs,
                long max_frames, fa_app_stats *stats)
 {
@@ -64,7 +84,9 @@ int fa_app_run(const fa_platform_cfg *cfg, const fa_app_cbs *cbs,
     uint64_t prev = pf.vt->now_ns(&pf);
     uint64_t rendered = 0, clamped = 0;
     int quit = 0;
+    uint32_t carry_actions_pressed = 0;
     uint32_t carry_pressed = 0;   /* button down-edges held until a tick sees them */
+    uint32_t carry_pad_pressed = 0;
     uint32_t carry_dbg = 0;       /* debug-key down-edges, same hold rule */
     char     carry_text[8];       /* typed chars, same hold rule */
     uint8_t  carry_text_n = 0;
@@ -77,7 +99,18 @@ int fa_app_run(const fa_platform_cfg *cfg, const fa_app_cbs *cbs,
         quit = pf.vt->pump(&pf, &in);
 
         actx.fi.actions = actions_of(&in);
+        carry_actions_pressed |= action_edges_of(&in);
+        actx.fi.actions_pressed = carry_actions_pressed;
+        actx.fi.pad_down = pad_buttons_of(&in, 0);
+        carry_pad_pressed |= pad_buttons_of(&in, 1);
+        actx.fi.pad_pressed = carry_pad_pressed;
+        actx.fi.pad_lx = fa_input_pad_axis(&in, FA_PAD_AXIS_LEFT_X);
+        actx.fi.pad_ly = fa_input_pad_axis(&in, FA_PAD_AXIS_LEFT_Y);
+        actx.fi.pad_rx = fa_input_pad_axis(&in, FA_PAD_AXIS_RIGHT_X);
+        actx.fi.pad_ry = fa_input_pad_axis(&in, FA_PAD_AXIS_RIGHT_Y);
+        actx.fi.pad_connected = (uint8_t)fa_input_pad_connected(&in);
         fa_input_pointer(&in, &actx.fi.ptr_x, &actx.fi.ptr_y);
+        actx.fi.ptr_moved = (uint8_t)fa_input_pointer_moved(&in);
         actx.fi.btn_down = 0;
         for (int b = 0; b < 3; b++) {
             if (fa_input_button_down(&in, b))    actx.fi.btn_down |= (1u << b);
@@ -108,7 +141,10 @@ int fa_app_run(const fa_platform_cfg *cfg, const fa_app_cbs *cbs,
         fa_loop_frame(&lp, dt, &actx.fi);
         clamped += (unsigned)lp.last_clamped;
         if (lp.last_steps > 0) {   /* a tick consumed the edges */
-            carry_pressed = 0; carry_dbg = 0;
+            carry_actions_pressed = 0;
+            carry_pressed = 0;
+            carry_pad_pressed = 0;
+            carry_dbg = 0;
             carry_text_n = 0; carry_edit = 0;
         }
 

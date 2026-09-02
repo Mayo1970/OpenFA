@@ -3,8 +3,9 @@
  *
  *   fa_slice                 open a window; show the title / world-select menu
  *                            if GData is found, else a test pattern. Click a
- *                            world circle to play it (GIUNGLA = world 1);
- *                            click ESCI to quit.
+ *                            world circle to play it (GIUNGLA = world 1), or
+ *                            use keyboard arrows / a controller D-pad and
+ *                            confirm with Enter / controller A.
  *   fa_slice --gdata DIR     use this GData directory
  *   fa_slice --world N       skip the menu, boot straight into world N (1..4)
  *   fa_slice --tut           with --world: load the tutorial layout (WeltNt)
@@ -17,6 +18,8 @@
  *   fa_slice --seed N        pin the enemy RNG (default: wall clock, RRR-57)
  *
  * Menu: this is the screen the real game opens on. Compare it to the oracle.
+ *       Mouse, keyboard arrows, and a controller D-pad select a world;
+ *       Enter / controller A confirms it.
  * Level (--world N): arrows walk, A jump, S throw, D switch kid. Esc quits.
  *   P  toggle free-move (dev): fly through walls to reach the pickups; hold
  *      A while flying for a fast dash. Pickups and the boss gate still work.
@@ -61,6 +64,7 @@ typedef struct {
     fa_hiscore *scores;          /* non-NULL = the high-score screen is up */
     int       show_scores;       /* request from the menu, handled next tick */
     int       hover;             /* menu button under the pointer, or -1 */
+    int       menu_focus;        /* keyboard / D-pad focused world, or -1 */
     int       pending_world;     /* 1..4: load this world next tick      */
     int       world;             /* 1..4: the world currently loaded     */
     int       in_end;            /* in the boss arena (WeltNE), not the world */
@@ -120,6 +124,7 @@ typedef struct {
     int       glide_was;    /* previous tick's penguin glide flag         */
 
     uint32_t  cr_act_was;   /* RRR-54: prev tick's action mask (credits skip) */
+    uint32_t  menu_nav_seen;/* suppress a held edge across multi-tick frames */
     int       score;        /* RRR-50: pickups collected                   */
     int       hurt_cd;      /* RRR-50: ticks of hit invulnerability left   */
     int       push_was;     /* RRR-50: previous tick was shoving a block   */
@@ -129,6 +134,43 @@ typedef struct {
     /* RRR-44/45 tuning overrides (whole px), <=0 = keep the default */
     int       ov_bboxw, ov_bboxh, ov_camdzx, ov_camdzy, ov_cambias;
 } slice;
+
+static void slice_focus_first_menu(slice *s)
+{
+    s->menu_focus = s->menu ? 0 : -1;
+    s->hover = s->menu ? 0 : -1;
+    s->menu_nav_seen = 0;
+    if (s->menu) {
+        for (int i = 0; i < fa_menu_button_count(s->menu); i++)
+            fa_menu_set_state(s->menu, i, FA_MENU_REST);
+        fa_menu_set_state(s->menu, 0, FA_MENU_HOVER);
+    }
+}
+
+static void slice_set_menu(slice *s, fa_menu *menu)
+{
+    s->menu = menu;
+    slice_focus_first_menu(s);
+}
+
+static void slice_merge_pad_movement(const fa_frame_input *fi, uint32_t *m)
+{
+    uint32_t b = fi->pad_down;
+    if ((b & (1u << FA_PAD_DPAD_LEFT)) || fi->pad_lx < -0.35f)
+        *m |= 1u << FA_ACT_LEFT;
+    if ((b & (1u << FA_PAD_DPAD_RIGHT)) || fi->pad_lx > 0.35f)
+        *m |= 1u << FA_ACT_RIGHT;
+    if ((b & (1u << FA_PAD_DPAD_UP)) || fi->pad_ly < -0.35f)
+        *m |= 1u << FA_ACT_UP;
+    if ((b & (1u << FA_PAD_DPAD_DOWN)) || fi->pad_ly > 0.35f)
+        *m |= 1u << FA_ACT_DOWN;
+
+    /* Xbox-reference face layout: A jumps, B throws, Y swaps the active kid.
+     * SDL_GameController supplies these as logical buttons on other layouts. */
+    if (b & (1u << FA_PAD_A)) *m |= 1u << FA_ACT_JUMP;
+    if (b & (1u << FA_PAD_B)) *m |= 1u << FA_ACT_FIRE;
+    if (b & (1u << FA_PAD_Y)) *m |= 1u << FA_ACT_SPARE;
+}
 
 /* decode one .W01 frame and blit it colour-keyed, centred on (cx, cy) in the
  * destination surface. Returns 1 on success, 0 if there is no sheet / the
@@ -794,7 +836,7 @@ static void begin_after_death(slice *s, int won)
          * table - it becomes an editable name row if it places. */
         fa_hiscore_begin(s->scores, s->world - 1, s->score, 1);
     } else {
-        s->menu = fa_menu_load(s->gdata);                /* no assets: menu */
+        slice_set_menu(s, fa_menu_load(s->gdata));      /* no assets: menu */
     }
 
     fa_death_init(&s->death);
@@ -804,11 +846,79 @@ static void begin_after_death(slice *s, int won)
 
 static int s_quit(void *user) { return ((slice *)user)->want_quit; }
 
+/* Find the closest world icon in a requested screen direction. The menu
+ * already owns the pixel rectangles, so controller navigation uses those
+ * decoded regions instead of a second hand-written layout. */
+static int menu_next_world(const fa_menu *m, int current, int dx, int dy)
+{
+    int ox = 400, oy = 300;
+    if (current >= 0 && current < 4) {
+        int x, y, w, h;
+        if (fa_menu_hit_rect(m, current, &x, &y, &w, &h) == 0) {
+            ox = x + w / 2;
+            oy = y + h / 2;
+        }
+    }
+
+    int best = -1, best_score = 0x7fffffff;
+    for (int i = 0; i < 4; i++) {
+        if (i == current) continue;
+        int x, y, w, h;
+        if (fa_menu_hit_rect(m, i, &x, &y, &w, &h) != 0) continue;
+        int vx = x + w / 2 - ox;
+        int vy = y + h / 2 - oy;
+        int primary = dx ? vx * dx : vy * dy;
+        if (primary <= 0) continue;
+        int secondary = dx ? abs(vy) : abs(vx);
+        int distance = vx * vx + vy * vy;
+        int score = primary * 10000 + secondary * 100 + distance;
+        if (score < best_score) {
+            best_score = score;
+            best = i;
+        }
+    }
+    return best;
+}
+
+static int menu_move_focus(slice *s, const fa_frame_input *fi)
+{
+    uint32_t keys = fi->actions_pressed;
+    uint32_t pad  = fi->pad_pressed;
+    uint32_t nav_edges = keys & ((1u << FA_ACT_LEFT) | (1u << FA_ACT_RIGHT) |
+                                 (1u << FA_ACT_UP) | (1u << FA_ACT_DOWN));
+    nav_edges |= pad & ((1u << FA_PAD_DPAD_LEFT) | (1u << FA_PAD_DPAD_RIGHT) |
+                        (1u << FA_PAD_DPAD_UP) | (1u << FA_PAD_DPAD_DOWN));
+    uint32_t fresh_edges = nav_edges & ~s->menu_nav_seen;
+    s->menu_nav_seen = nav_edges;
+    if (!nav_edges) s->menu_nav_seen = 0;
+    if (!fresh_edges) return 0;
+
+    int dx = 0, dy = 0;
+
+    if (fresh_edges & ((1u << FA_ACT_LEFT) | (1u << FA_PAD_DPAD_LEFT)))
+        dx = -1;
+    else if (fresh_edges & ((1u << FA_ACT_RIGHT) | (1u << FA_PAD_DPAD_RIGHT)))
+        dx = 1;
+    else if (fresh_edges & ((1u << FA_ACT_UP) | (1u << FA_PAD_DPAD_UP)))
+        dy = -1;
+    else if (fresh_edges & ((1u << FA_ACT_DOWN) | (1u << FA_PAD_DPAD_DOWN)))
+        dy = 1;
+
+    int had_focus = s->menu_focus >= 0 && s->menu_focus < 4;
+    int current = had_focus ? s->menu_focus : 0;
+    int next = menu_next_world(s->menu, current, dx, dy);
+    if (next < 0 && !had_focus) next = 0;
+    if (next < 0) return 0;
+    s->menu_focus = next;
+    return 1;
+}
+
 static void s_sim(uint64_t tick, const void *input, void *user)
 {
     slice *s = (slice *)user;
     const fa_frame_input *fi = (const fa_frame_input *)input;
     uint32_t m = fi->actions;
+    slice_merge_pad_movement(fi, &m);
     (void)tick;
 
     if (s->pending_world) {
@@ -844,7 +954,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
         if (fa_credits_done(s->credits)) {
             fa_credits_free(s->credits);
             s->credits = NULL;
-            s->menu = fa_menu_load(s->gdata);
+            slice_set_menu(s, fa_menu_load(s->gdata));
             slice_audio_hush(s);
             if (s->audio) fa_audio_event(s->audio, FA_SND_MENU_MUSIC);
             printf("credits done -> the menu\n");
@@ -887,27 +997,38 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             fa_hiscore_free(s->scores);
             s->scores = NULL;
             if (!s->menu) {                  /* came from a death */
-                s->menu = fa_menu_load(s->gdata);
+                slice_set_menu(s, fa_menu_load(s->gdata));
                 s->score = 0;
+            } else {
+                slice_focus_first_menu(s);
             }
         }
         return;
     }
 
     if (s->menu) {
+        int navigated = menu_move_focus(s, fi);
         int pick = fa_menu_pick(s->menu, fi->ptr_x, fi->ptr_y);
-        int held = (fi->btn_down & 1u) != 0;
+        int mouse_click = (fi->btn_pressed & 1u) != 0;
+        if (!navigated && fi->ptr_moved) s->menu_focus = pick;
+        if (mouse_click && pick >= 0) s->menu_focus = pick;
+        int focus = s->menu_focus >= 0 ? s->menu_focus : pick;
+        int held = (fi->btn_down & 1u) != 0 ||
+                   (fi->pad_down & (1u << FA_PAD_A)) != 0;
         for (int i = 0; i < fa_menu_button_count(s->menu); i++)
             fa_menu_set_state(s->menu, i,
-                i == pick ? (held ? FA_MENU_PRESS : FA_MENU_HOVER)
+                i == focus ? (held ? FA_MENU_PRESS : FA_MENU_HOVER)
                           : FA_MENU_REST);
-        if (s->audio && pick >= 0 && pick != s->hover)
+        if (s->audio && focus >= 0 && focus != s->hover)
             fa_audio_event(s->audio, FA_SND_MENU_HOVER);   /* alsf08 (PL-118) */
-        s->hover = pick;
-        if (pick >= 0 && (fi->btn_pressed & 1u)) {
-            if (pick <= 3)       s->pending_world = pick + 1;  /* GIUNGLA=1 */
-            else if (pick == 4)  s->show_scores = 1;           /* CLASSIFICA */
-            else if (pick == 5)  s->want_quit = 1;             /* ESCI */
+        s->hover = focus;
+        int confirm = (mouse_click && pick >= 0) ||
+                      (fi->pad_pressed & (1u << FA_PAD_A)) != 0 ||
+                      (fi->edit_pressed & FA_EDIT_ENTER) != 0;
+        if (focus >= 0 && confirm) {
+            if (focus <= 3)       s->pending_world = focus + 1; /* GIUNGLA=1 */
+            else if (focus == 4)  s->show_scores = 1;            /* CLASSIFICA */
+            else if (focus == 5)  s->want_quit = 1;              /* ESCI */
         }
         return;
     }
@@ -1517,7 +1638,8 @@ int main(int argc, char **argv)
             printf("fa_slice [--gdata DIR] [--world 1..4] [--tut|--end] "
                    "[--credits] [--grid] "
                    "[--tone|--silent|--mute] [--vol N] [--frames N]\n"
-                   "  no --world: the menu - click a world circle to play it\n"
+                    "  no --world: the menu - click a world circle, or use arrows / D-pad\n"
+                    "           and Enter / controller A to play it\n"
                    "  --credits: roll the credits screen (Credit1..4.bmp + "
                    "ENDTITLES), then the menu\n"
                    "  a world with tut.ini byte 0 loads its tutorial (WeltNt) "
@@ -1550,6 +1672,7 @@ int main(int argc, char **argv)
     s.mute = mute;
     s.vol = vol;
     s.hover = -1;
+    s.menu_focus = -1;
     s.ov_gravity = ov_g; s.ov_jumpvel = ov_j; s.ov_jumpvel2 = ov_j2;
     s.ov_runspeed = ov_r; s.ov_airaccel = ov_a;
     s.ov_bboxw = ov_bw; s.ov_bboxh = ov_bh;
@@ -1609,7 +1732,7 @@ int main(int argc, char **argv)
             printf("could not load Welt%d from %s\n", world, gdata);
         }
     } else {
-        s.menu = fa_menu_load(gdata);
+        slice_set_menu(&s, fa_menu_load(gdata));
         if (s.menu) {
             if (s.audio) fa_audio_event(s.audio, FA_SND_MENU_MUSIC);
             printf("loaded the title / world-select menu from %s (%d buttons)\n",
@@ -1627,8 +1750,8 @@ int main(int argc, char **argv)
     }
 
     if (s.menu)
-        printf("click a world circle to play it (GIUNGLA = world 1), "
-               "ESCI to quit.\n");
+        printf("click a world circle to play it (GIUNGLA = world 1), or use "
+               "arrows / D-pad + Enter / controller A; ESCI to quit.\n");
 
     fa_app_cbs cbs;
     memset(&cbs, 0, sizeof cbs);

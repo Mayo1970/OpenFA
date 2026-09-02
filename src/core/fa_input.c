@@ -42,6 +42,8 @@ void fa_input_begin_frame(fa_input *in)
 {
     memcpy(in->keys_prev, in->keys, sizeof in->keys);
     memcpy(in->btn_prev, in->btn, sizeof in->btn);
+    memcpy(in->pad_buttons_prev, in->pad_buttons, sizeof in->pad_buttons);
+    in->ptr_moved = 0;
 }
 
 /* ------------------------------------------------------------ backend feeds */
@@ -75,6 +77,7 @@ void fa_input_set_pointer(fa_input *in, int x, int y)
     if (y < 0) y = 0;
     if (x >= in->ptr_w) x = in->ptr_w - 1;
     if (y >= in->ptr_h) y = in->ptr_h - 1;
+    if (x != in->ptr_x || y != in->ptr_y) in->ptr_moved = 1u;
     in->ptr_x = x;
     in->ptr_y = y;
     in->ptr_acc_x = 0.0f;
@@ -85,6 +88,60 @@ void fa_input_set_button(fa_input *in, int btn, int down)
 {
     if (btn < 0 || btn > 2) return;
     in->btn[btn] = down ? 1u : 0u;
+}
+
+void fa_input_set_pad_connected(fa_input *in, int connected)
+{
+    if (connected) {
+        in->pad_connected = 1u;
+        return;
+    }
+
+    in->pad_connected = 0u;
+    memset(in->pad_buttons, 0, sizeof in->pad_buttons);
+    memset(in->pad_axes, 0, sizeof in->pad_axes);
+}
+
+void fa_input_set_pad_button(fa_input *in, fa_pad_button btn, int down)
+{
+    if (btn < 0 || btn >= FA_PAD_BUTTON_COUNT) return;
+    in->pad_buttons[btn] = down ? 1u : 0u;
+}
+
+void fa_input_set_pad_axis(fa_input *in, fa_pad_axis axis, float value)
+{
+    if (axis < 0 || axis >= FA_PAD_AXIS_COUNT) return;
+    if (value < -1.0f) value = -1.0f;
+    if (value >  1.0f) value =  1.0f;
+    in->pad_axes[axis] = value;
+}
+
+int fa_input_pad_connected(const fa_input *in)
+{
+    return in->pad_connected != 0;
+}
+
+int fa_input_pad_button_down(const fa_input *in, fa_pad_button btn)
+{
+    if (btn < 0 || btn >= FA_PAD_BUTTON_COUNT) return 0;
+    return in->pad_buttons[btn] != 0;
+}
+
+int fa_input_pad_button_pressed(const fa_input *in, fa_pad_button btn)
+{
+    if (btn < 0 || btn >= FA_PAD_BUTTON_COUNT) return 0;
+    return in->pad_buttons[btn] && !in->pad_buttons_prev[btn];
+}
+
+float fa_input_pad_axis(const fa_input *in, fa_pad_axis axis)
+{
+    if (axis < 0 || axis >= FA_PAD_AXIS_COUNT) return 0.0f;
+    return in->pad_axes[axis];
+}
+
+int fa_input_pointer_moved(const fa_input *in)
+{
+    return in->ptr_moved != 0;
 }
 
 /* ------------------------------------------------------- console fallback */
@@ -126,6 +183,7 @@ void fa_input_stick(fa_input *in, float ax, float ay)
     if (ny < 0) ny = 0;
     if (nx >= in->ptr_w) nx = in->ptr_w - 1;
     if (ny >= in->ptr_h) ny = in->ptr_h - 1;
+    if (nx != in->ptr_x || ny != in->ptr_y) in->ptr_moved = 1u;
     in->ptr_x = nx;
     in->ptr_y = ny;
 }

@@ -15,8 +15,9 @@
  *   6. backend wait          (optional frame cap)
  *
  * The sim callback gets a pointer to a uint32 action bitmask (bit
- * (1u << fa_action) per pressed action, from the current binds). Every sim
- * tick in one frame sees the same latched mask (PL-031).
+ * (1u << fa_action) per held action, from the current binds). Every sim tick
+ * in one frame sees the same latched state (PL-031), including the separate
+ * down-edge masks used by menus and one-shot actions.
  */
 #ifndef FA_APP_H
 #define FA_APP_H
@@ -37,8 +38,15 @@ struct fa_platform_cfg;
  * latched once per frame, `btn_pressed` is the down edge.
  */
 typedef struct fa_frame_input {
-    uint32_t actions;        /* bit (1u << fa_action) per pressed action */
+    uint32_t actions;        /* bit (1u << fa_action) per held action */
+    uint32_t actions_pressed;/* action down-edges, carried until a sim tick */
+    uint32_t pad_down;       /* bit (1u << fa_pad_button) per held button */
+    uint32_t pad_pressed;    /* controller button down-edges */
+    float    pad_lx, pad_ly; /* normalized left stick axes, -1..1 */
+    float    pad_rx, pad_ry; /* normalized right stick axes, -1..1 */
+    uint8_t  pad_connected;  /* SDL has an active mapped controller */
     int      ptr_x, ptr_y;
+    uint8_t  ptr_moved;       /* pointer changed during this frame */
     uint32_t btn_down;       /* bit b per held mouse button (b = 0..2)   */
     uint32_t btn_pressed;    /* bit b per button that went down this frame */
     uint32_t dbg_pressed;    /* debug-key down edges, carried until a tick
