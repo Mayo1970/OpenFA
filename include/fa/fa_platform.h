@@ -53,6 +53,9 @@ typedef struct fa_platform_cfg {
     int         audio_channels;  /* 0 -> 2                                    */
     int         fullscreen;      /* desktop backend only                      */
     int         integer_scale;   /* desktop backend: keep pixel-exact scaling */
+    int         window_scale;    /* desktop backend: on-screen multiple of the
+                                    framebuffer; 0/1 -> native. Does not touch
+                                    the framebuffer, only the window size.     */
 } fa_platform_cfg;
 
 typedef struct fa_platform_vtbl {

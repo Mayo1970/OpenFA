@@ -116,6 +116,27 @@ static int feet_blocked(const fa_player *p)
            p->solid_fn(px + hw, py + 1, p->solid_ctx) == FA_SOLID_FULL;
 }
 
+/* While climbing: the nearest feet-Y at which the body would rest on a floor
+ * (solid OR one-way), searching from `down` px below the feet up to `up` px
+ * above them, or INT32_MAX if none. Searching bottom-up returns the lowest
+ * rest spot, so a floor is caught as soon as the rising feet reach its top -
+ * and a floor that ends up around the body (a rope hung from an upper deck)
+ * lifts the kid onto it. Reuses the tested fa_collide ground test. */
+static int32_t climb_ledge_y(const fa_player *p, int up, int down)
+{
+    if (!p->solid_fn) return INT32_MAX;
+    fa_aabb_body bd;
+    bd.x = p->x; bd.vx = bd.vy = 0; bd.on_ground = 0;
+    bd.hw = p->t.body_hw > 0 ? p->t.body_hw : 1;
+    bd.h  = p->t.body_h  > 0 ? p->t.body_h  : 1;
+    for (int d = down; d >= -up; d--) {
+        bd.y = p->y + FA_FIX(d);
+        if (fa_collide_grounded(&bd, 0, p->solid_fn, p->solid_ctx))
+            return bd.y;
+    }
+    return INT32_MAX;
+}
+
 /* xorshift32 - a deterministic stand-in for the game RNG 0x4395b0 (RRR-52). */
 static uint32_t prng(fa_player *p)
 {
@@ -290,6 +311,9 @@ void fa_player_tick(fa_player *p, uint32_t in)
                 if (!ladder_near_y(p, ny)) break;   /* reached the vine top */
                 if (p->solid_fn && p->solid_fn(px, ny - t->body_h,
                         p->solid_ctx) == FA_SOLID_FULL) break;  /* ceiling */
+                /* a floor now within reach around the feet = we climbed up to
+                 * a deck: stop rising; the dismount below lifts us onto it. */
+                if (climb_ledge_y(p, t->body_h, -4) != INT32_MAX) break;
                 p->y -= FA_FIX(1); moved = 1;
             }
         } else if (down) {
@@ -323,6 +347,18 @@ void fa_player_tick(fa_player *p, uint32_t in)
         px = fa_player_px(p);
         int32_t gnd = ground_at(p, p->x);
         int on_floor = (!p->solid_fn && p->y >= gnd) || feet_blocked(p);
+
+        /* A floor within reach around the feet ends the climb: lift or drop
+         * the kid onto it and stand - no jump. Works both ways: a deck the
+         * rising feet just reached, and a deck around the body when the rope
+         * hangs from an upper floor. DOWN still climbs past / below a deck. */
+        if (!on_floor && !down && p->solid_fn) {
+            /* climbing up: only a floor ABOVE the feet counts, so the kid is
+             * never yanked back down onto a deck it has just passed. */
+            int32_t ly = climb_ledge_y(p, t->body_h, up ? -4 : 8);
+            if (ly != INT32_MAX) { p->y = ly; on_floor = 1; }
+        }
+
         int has_vine = ladder_near(p) ||
                        ladder_at(p, px, fa_player_py(p)) ||
                        ladder_at(p, px, fa_player_py(p) + 1);
@@ -333,7 +369,7 @@ void fa_player_tick(fa_player *p, uint32_t in)
             p->on_ladder = 0;
             p->idle_timer = t->idle_delay;
         } else if (!has_vine) {
-            p->state = FA_PST_FALL;             /* climbed off the top */
+            p->state = FA_PST_FALL;            /* climbed off the top */
             p->on_ladder = 0;
         } else {
             p->on_ladder = 1;

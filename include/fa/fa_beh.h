@@ -64,8 +64,9 @@ enum {
     FA_BEH_SFX_FREEZE,         /* the snowman froze                         */
     FA_BEH_SFX_BOSS_HIT,       /* a boss took an accepted hit               */
     FA_BEH_SFX_BOSS_KO,        /* a boss was defeated                       */
-    FA_BEH_SFX_BROESEL_BREAK   /* a crumbling platform broke (0x422B60 id 6,
+    FA_BEH_SFX_BROESEL_BREAK,  /* a crumbling platform broke (0x422B60 id 6,
                                 * knusper.wav, slot 6)                       */
+    FA_BEH_SFX_BOSS_CHARGE     /* RRR-61: the robot boss winds up to fire   */
 };
 
 typedef struct fa_beh_hooks {

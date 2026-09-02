@@ -101,6 +101,14 @@ typedef enum fa_snd_event {
     FA_SND_HIT_P,          /* pi0005.wav lane 0 - also the fatal hit */
     FA_SND_HIT_M,          /* ms0007.wav lane 1 - also the fatal hit */
     FA_SND_MENU_HOVER,     /* alsf08.wav - world / option hover */
+    /* RRR-61: the World-3 (FABBRICA) robot-boss cues (preload 0x4122F9..,
+     * owner-confirmed in playtest). */
+    FA_SND_W3_BUTTON,      /* w3sf07.wav lane 3 - a button is pushed         */
+    FA_SND_W3_PIPE,        /* w3sf08.wav lane 4 - the pipe drops             */
+    FA_SND_W3_BOSS_HIT,    /* w3sf09.wav lane 4 - the pipe hits the robot    */
+    FA_SND_W3_BOSS_SHOT,   /* w3sf03.wav lane 6 - the robot fires a bolt     */
+    FA_SND_W3_BOSS_CHARGE, /* "W3SF05 2.Alternative.wav" lane 9 - wind-up    */
+    FA_SND_W3_BOSS_DEFEAT, /* w3sf04a.wav lane 9 - the robot is defeated     */
 
     FA_SND__COUNT
 } fa_snd_event;

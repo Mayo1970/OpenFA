@@ -284,8 +284,10 @@ static void beh_sfx(int ev, int obj, void *ctx)
     slice *s = (slice *)ctx;
     if (!s->audio) return;
     switch (ev) {
-        case FA_BEH_SFX_ENEMY_KO:
         case FA_BEH_SFX_BOSS_KO:
+            if (obj == 14) { fa_audio_event(s->audio, FA_SND_W3_BOSS_DEFEAT); break; }
+            /* fall through */
+        case FA_BEH_SFX_ENEMY_KO:
         case FA_BEH_SFX_FREEZE:    /* snowman: 0x422B60(3, alsf04) at 0x41AC5C */
                                   fa_audio_event(s->audio, FA_SND_ENEMY_DEFEAT); break;
         case FA_BEH_SFX_ENEMY_LAUNCH: break;   /* alsf04 already played at KO  */
@@ -296,9 +298,20 @@ static void beh_sfx(int ev, int obj, void *ctx)
             break;
         case FA_BEH_SFX_ENEMY_SHOT:            /* the throw - egg robot differs */
             fa_audio_event(s->audio,
+                obj == 14 ? FA_SND_W3_BOSS_SHOT :       /* RRR-61 robot bolt   */
                 obj == 12 ? FA_SND_ENEMY_THROW_EGG : FA_SND_ENEMY_THROW);
             break;
-        case FA_BEH_SFX_BOSS_HIT:  fa_audio_event(s->audio, FA_SND_ENEMY_KNOCK);  break;
+        case FA_BEH_SFX_BOSS_CHARGE:                    /* RRR-61 robot wind-up */
+            fa_audio_event(s->audio, FA_SND_W3_BOSS_CHARGE); break;
+        case FA_BEH_SFX_BOSS_HIT:
+            /* RRR-61 World 3: button push / pipe drop / the robot taking a
+             * hit each have their own w3sf cue (owner playtest). */
+            fa_audio_event(s->audio,
+                (obj == 83 || obj == 84) ? FA_SND_W3_BUTTON :
+                obj == 85                ? FA_SND_W3_PIPE :
+                obj == 14                ? FA_SND_W3_BOSS_HIT
+                                         : FA_SND_ENEMY_KNOCK);
+            break;
         case FA_BEH_SFX_BROESEL_BREAK: {   /* 0x422B60(6, knusper.wav) at 0x416D2D */
             int clip = fa_audio_load(s->audio, "SDat/knusper.wav");
             if (clip >= 0) fa_audio_play_clip(s->audio, clip, 6, 0, 256);
@@ -348,10 +361,46 @@ static void beh_tutorial_done(void *ctx)
  * per-tick by bee_audio(). (The flying-robot loop is ufo_audio() below.) */
 static void set_world_ambient(slice *s, int world)
 {
+    (void)world;
     if (!s->audio) return;
     fa_audio_stop(s->audio, 12);
     fa_audio_stop(s->audio, 14);
-    if (world == 3) fa_audio_event(s->audio, FA_SND_AMBIENT_W3);
+    /* World 3's w3sf01 is the electric-floor loop, not a whole-level ambient.
+     * It is gated per-tick by elec_audio(). */
+}
+
+/* stop every looping / one-shot SFX lane plus the voice channels. Called on
+ * any level or menu transition so ambient / proximity loops (electric floor,
+ * UFO, bee, glide, boss charge) never bleed across screens (owner ask). */
+static void slice_audio_hush(slice *s)
+{
+    if (!s->audio) return;
+    fa_audio_stop_sfx(s->audio);
+    fa_audio_stop(s->audio, FA_CH_VOICE);
+    fa_audio_stop(s->audio, FA_CH_BOSS);
+}
+
+/* the electric-floor loop (w3sf01): plays while any electric-floor object
+ * (ObjNr 355 f_elektro_gr / 356 f_elektro_kl) is inside the camera view,
+ * silent otherwise - the same in-view gate as the UFO / bee loops. */
+static void elec_audio(slice *s)
+{
+    if (!s->audio || !s->ents || s->world != 3) return;
+    int in_view = 0;
+    int n = fa_entity_count(s->ents);
+    for (int i = 0; i < n; i++) {
+        const fa_entity_rec *e = fa_entity_at(s->ents, i);
+        if (!e || !e->active || (e->obj_nr != 355 && e->obj_nr != 356)) continue;
+        int x0, y0, x1, y1;
+        if (fa_entity_frame_box(s->ents, i, &x0, &y0, &x1, &y1) != 0) {
+            x0 = x1 = e->x; y0 = y1 = e->y;
+        }
+        if (x1 >= s->cam.x && x0 <= s->cam.x + FA_FB_W &&
+            y1 >= s->cam.y && y0 <= s->cam.y + FA_FB_H) { in_view = 1; break; }
+    }
+    int playing = fa_audio_channel_busy(s->audio, 14);
+    if (in_view && !playing)      fa_audio_event(s->audio, FA_SND_AMBIENT_W3);
+    else if (!in_view && playing) fa_audio_stop(s->audio, 14);
 }
 
 /* the bee proximity loop (w4sf03, welt4 only): plays while ANY bee (ObjNr 16)
@@ -606,6 +655,7 @@ static const char *slice_world_suffix(const char *gdata, int world, int force_tu
 
 static void enter_world(slice *s, int world)
 {
+    slice_audio_hush(s);
     if (s->menu) { fa_menu_free(s->menu); s->menu = NULL; }
     const char *suf = slice_world_suffix(s->gdata, world, 0);
     if (load_world(s, s->gdata, world, suf, suf) == 0) {
@@ -643,6 +693,7 @@ static void enter_world(slice *s, int world)
  */
 static void enter_end(slice *s)
 {
+    slice_audio_hush(s);
     int world = s->world;
     if (load_world(s, s->gdata, world, "", "E") == 0) {
         s->have_map = 1;
@@ -679,6 +730,7 @@ static void enter_end(slice *s)
  */
 static void begin_after_death(slice *s, int won)
 {
+    slice_audio_hush(s);
     if (s->audio) fa_audio_event(s->audio, FA_SND_MENU_MUSIC);   /* Start.wav */
 
     fa_beh_free(s->beh);  s->beh = NULL;
@@ -744,6 +796,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             fa_credits_free(s->credits);
             s->credits = NULL;
             s->menu = fa_menu_load(s->gdata);
+            slice_audio_hush(s);
             if (s->audio) fa_audio_event(s->audio, FA_SND_MENU_MUSIC);
             printf("credits done -> the menu\n");
         }
@@ -834,6 +887,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             if (s->beh) { int kb = 0; (void)fa_beh_post(s->beh, &kb); }
             ufo_audio(s);
             bee_audio(s);
+            elec_audio(s);
             fa_player_tick(&s->pl, 0);          /* no input; body settles */
             fa_camera_follow(&s->cam, fa_player_px(&s->pl), fa_player_py(&s->pl));
             if (s->have_kids) {
@@ -1000,6 +1054,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             int dmg = s->beh ? fa_beh_post(s->beh, &kb) : 0;
             ufo_audio(s);
             bee_audio(s);
+            elec_audio(s);
             if (dmg && s->hurt_cd == 0 && !s->freemove) {
                 s->health -= dmg;
                 s->hurt_cd = 120;              /* 0x41A538: 0x78 ticks */
@@ -1080,7 +1135,13 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             /* the climb pose freezes while the player is not moving (PL-102) */
             fa_cs_anim_set_period(&s->kid_anim[k],
                 (s->pl.state == FA_PST_CLIMB && !s->pl.climb_moving) ? 0 : 2);
-            fa_cs_anim_set(&s->kid_anim[k], pose, s->pl.facing);
+            /* the climb sheet is a front-on pose - pin it to one orientation so
+             * it never mirrors with input. The correct look is the mirror of
+             * the raw art (owner: Fettalatte must read white-left / red-right). */
+            int cface = s->pl.facing;
+            if (pose == FA_CS_CLIMB && s->kid_anim[k].sheet)
+                cface = -s->kid_anim[k].sheet->base_facing;
+            fa_cs_anim_set(&s->kid_anim[k], pose, cface);
             fa_cs_anim_tick(&s->kid_anim[k]);
         }
         return;
@@ -1187,6 +1248,7 @@ static void s_render(double alpha, uint16_t *fb, int w, int h, size_t pitch,
                     case 12: pf = 23; break;
                     case 15: pf = 53; break;
                     case 10: pf = 87; break;
+                    case 14: pf = 188; break;   /* robot boss bolt (RRR-61) */
                     default: pf = -1; break;
                 }
                 const fa_w01 *pw = (pf >= 0 && s->ents)
@@ -1350,6 +1412,7 @@ int main(int argc, char **argv)
     const char *gdata_arg = NULL;
     int world = 0, tut = 0, end = 0, grid = 0, tone = 0, silent = 0, mute = 0, vol = -1;
     int show_credits = 0;
+    int win_scale = 0, fullscreen = 0, crisp = 0;
     double ov_g = 0, ov_j = 0, ov_j2 = 0, ov_r = 0, ov_a = 0;
     int ov_bw = 0, ov_bh = 0, ov_cx = 0, ov_cy = 0, ov_cb = 0;
     long seed_arg = -1;              /* RRR-57: >=0 pins the enemy RNG seed */
@@ -1370,6 +1433,9 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--mute"))   mute = 1;
         else if (!strcmp(argv[i], "--vol") && i + 1 < argc) vol = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--seed") && i + 1 < argc) seed_arg = strtol(argv[++i], NULL, 0);
+        else if (!strcmp(argv[i], "--scale") && i + 1 < argc) win_scale = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--fullscreen")) fullscreen = 1;
+        else if (!strcmp(argv[i], "--crisp"))      crisp = 1;
         else if (!strcmp(argv[i], "--gravity")   && i + 1 < argc) ov_g  = atof(argv[++i]);
         else if (!strcmp(argv[i], "--jumpvel")   && i + 1 < argc) ov_j  = atof(argv[++i]);
         else if (!strcmp(argv[i], "--jumpvel2")  && i + 1 < argc) ov_j2 = atof(argv[++i]);
@@ -1396,6 +1462,10 @@ int main(int argc, char **argv)
                    "(--tone keeps it, --silent off)\n"
                    "  --seed N: pin the enemy RNG (default: wall clock, "
                    "like the retail exe)\n"
+                   "  --scale N: open the window at N x 800x600 (render stays "
+                   "800x600, scaled up to fill); --fullscreen fills the "
+                   "display; --crisp keeps whole-number scaling (sharp pixels, "
+                   "black bars)\n"
                    "  physics tuning (px/tick): --gravity 0.6 --jumpvel 11 "
                    "--jumpvel2 9 --runspeed 5 --airaccel 1.2\n"
                    "    (--jumpvel = penguin, --jumpvel2 = Fettalatte; D switches)\n"
@@ -1502,7 +1572,9 @@ int main(int argc, char **argv)
     memset(&cfg, 0, sizeof cfg);
     cfg.title = "Fresh Adventures";
     cfg.want_audio = 1;
-    cfg.integer_scale = 1;
+    cfg.integer_scale = crisp ? 1 : 0;   /* default: fill the window/screen */
+    cfg.window_scale = win_scale;
+    cfg.fullscreen = fullscreen;
 
     fa_app_stats st;
     int rc = fa_app_run(&cfg, &cbs, frames, &st);

@@ -598,7 +598,12 @@ static void entity_init_runtime(fa_entity_store *st)
          * until RRR-51 gives it real per-type movement. */
         e->is_lift = e->is_block = e->gravity = 0;
         e->vy_acc = e->deck_off = 0;
-        if (e->detail_group == 0) {
+        if (e->obj_nr == 83) {
+            /* RRR-61: the FABBRICA boss-arena button. is_block so the player
+             * push probe (fa_beh_push) can register a shove; beh_button
+             * watches for it and never lets the button slide. */
+            e->is_block = 1;
+        } else if (e->detail_group == 0) {
             if (e->obj_nr == 76 || e->obj_nr == 78 ||
                 e->obj_nr == 86 || e->obj_nr == 87) {
                 /* pushable blocks (PL-135): ObjNr 76/78/86/87 all run

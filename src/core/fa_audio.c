@@ -226,6 +226,12 @@ static const snd_def SND_TBL[FA_SND__COUNT] = {
     [FA_SND_HIT_P]        = { "SDat/voices/ita/pi0005.wav", 0, 0 },
     [FA_SND_HIT_M]        = { "SDat/voices/ita/ms0007.wav", 1, 0 },
     [FA_SND_MENU_HOVER]   = { "SDat/alsf08.wav",   2, 0 },
+    [FA_SND_W3_BUTTON]      = { "SDat/w3sf07.wav",             3, 0 },
+    [FA_SND_W3_PIPE]        = { "SDat/w3sf08.wav",             4, 0 },
+    [FA_SND_W3_BOSS_HIT]    = { "SDat/w3sf09.wav",             4, 0 },
+    [FA_SND_W3_BOSS_SHOT]   = { "SDat/w3sf03.wav",             6, 0 },
+    [FA_SND_W3_BOSS_CHARGE] = { "SDat/W3SF05 2.Alternative.wav",9, 0 },
+    [FA_SND_W3_BOSS_DEFEAT] = { "SDat/w3sf04a.wav",            9, 0 },
 };
 
 /* ================================================================== *

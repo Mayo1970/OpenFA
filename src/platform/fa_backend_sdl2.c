@@ -252,9 +252,12 @@ int fa_backend_sdl2_create(fa_platform *p, const fa_platform_cfg *cfg)
 
     Uint32 wflags = SDL_WINDOW_RESIZABLE |
                     ((cfg && cfg->fullscreen) ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+    /* window_scale only enlarges the window; the framebuffer stays w x h and
+     * SDL_RenderSetLogicalSize scales it up to fill. */
+    int ws = (cfg && cfg->window_scale > 1) ? cfg->window_scale : 1;
     s->win = SDL_CreateWindow(cfg && cfg->title ? cfg->title : "Ferrero Jump&Run",
                               SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                              w, h, wflags);
+                              w * ws, h * ws, wflags);
     if (!s->win) goto fail;
 
     /* No SDL_RENDERER_PRESENTVSYNC: the fixed-timestep loop owns cadence
@@ -262,7 +265,9 @@ int fa_backend_sdl2_create(fa_platform *p, const fa_platform_cfg *cfg)
     s->ren = SDL_CreateRenderer(s->win, -1, SDL_RENDERER_ACCELERATED);
     if (!s->ren) s->ren = SDL_CreateRenderer(s->win, -1, 0);
     if (!s->ren) goto fail;
-    SDL_RenderSetLogicalSize(s->ren, w, h);
+    /* No SDL_RenderSetLogicalSize: sdl_present / map_pointer do their own
+     * letterbox math in real output pixels. Setting a logical size here made
+     * SDL transform those coords a second time -> tiny, off-centre image. */
 
     if (cfg && cfg->want_audio) {
         SDL_AudioSpec want, have;
