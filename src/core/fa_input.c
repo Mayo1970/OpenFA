@@ -52,6 +52,23 @@ void fa_input_set_key(fa_input *in, int dik, int down)
     in->keys[dik] = down ? 1u : 0u;
 }
 
+char fa_input_text_char(int dik)
+{
+    /* DIK scancode -> ASCII, for the high-score name field. */
+    static const char row_q[] = "QWERTYUIOP";   /* 0x10..0x19 */
+    static const char row_a[] = "ASDFGHJKL";    /* 0x1E..0x26 */
+    static const char row_z[] = "ZXCVBNM";      /* 0x2C..0x32 */
+    if (dik >= 0x10 && dik <= 0x19) return row_q[dik - 0x10];
+    if (dik >= 0x1E && dik <= 0x26) return row_a[dik - 0x1E];
+    if (dik >= 0x2C && dik <= 0x32) return row_z[dik - 0x2C];
+    if (dik >= 0x02 && dik <= 0x0A) return (char)('1' + (dik - 0x02));  /* 1..9 */
+    if (dik == 0x0B) return '0';
+    if (dik == 0x0C) return '-';
+    if (dik == 0x34) return '.';
+    if (dik == FA_DIK_SPACE) return ' ';
+    return 0;
+}
+
 void fa_input_set_pointer(fa_input *in, int x, int y)
 {
     if (x < 0) x = 0;

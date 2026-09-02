@@ -85,19 +85,17 @@ typedef enum fa_snd_event {
     FA_SND_ENEMY_DIVE_EAGLE,/* w2sf01.wav lane 8 - eagle dive (ds:0x4E0A90, 0x40A931) */
     FA_SND_ENEMY_DIVE_BEE, /* w1sf03.wav lane 8 - bee (ds:0x4DAC3C, 0x40C30A) */
 
-    /* w3sf11 is the POSITIONAL loop tied to the flying robot (ObjNr 13):
-     * the exe loops it on ch 14 and modulates the volume by distance to the
-     * nearest robot (0x412EE0 registers the emitter on slot 14). Our port
-     * plays it while a robot is in view. */
-    FA_SND_UFO,            /* w3sf11.wav lane 12 loop */
-    /* World 3 ambient loop (0x412643..0x4126DD): w3sf01 on ch 8/14. */
-    FA_SND_AMBIENT_W3,     /* w3sf01.wav lane 14 loop */
-    /* w4sf03 is NOT a world ambient - it is the POSITIONAL loop tied to the
-     * bee (ObjNr 16, welt4 only): the bee handler 0x40BBA0 registers the
-     * emitter via 0x412EE0 (same routine as the flying-robot UFO loop), and
-     * world-4 setup 0x41267D starts w4sf03 on ch 14 at volume -100, raised by
-     * proximity to the nearest bee. Our port plays it while a bee is in view. */
-    FA_SND_BEE_LOOP,      /* w4sf03.wav lane 14 loop */
+    /* The exe's three POSITIONAL loops. Each is started muted at world load
+     * (0x412643) on a fixed slot and its volume is ridden per frame by the
+     * distance from screen centre to the nearest emitter (emitter routine
+     * 0x412EE0, volume pass 0x41139D). fa_slice posloop_update reproduces the
+     * curve; the slot numbers here match the exe.
+     *   w3sf11 slot 14  flying robot   (ObjNr 13, handler 0x4106C0)
+     *   w3sf01 slot  8  electric floor (ObjNr 355/356, handler 0x415F10)
+     *   w4sf03 slot 14  bee            (ObjNr 16, handler 0x40BBA0) */
+    FA_SND_UFO,            /* w3sf11.wav lane 14 loop - flying robot   */
+    FA_SND_AMBIENT_W3,     /* w3sf01.wav lane  8 loop - electric floor */
+    FA_SND_BEE_LOOP,      /* w4sf03.wav lane 14 loop - bee            */
     FA_SND_HIT_P,          /* pi0005.wav lane 0 - also the fatal hit */
     FA_SND_HIT_M,          /* ms0007.wav lane 1 - also the fatal hit */
     FA_SND_MENU_HOVER,     /* alsf08.wav - world / option hover */
@@ -115,6 +113,11 @@ typedef enum fa_snd_event {
      * 0x4123C1.., 0x40CD70 handler). Both on lane 9, one-shot. */
     FA_SND_W4_BOSS_DRINK,  /* w4sf01.wav lane 9 - the octopus drinks milk (vulnerable) */
     FA_SND_W4_BOSS_SHOT,   /* w4sf02.wav lane 9 - the octopus fires a milk particle    */
+
+    /* RRR-60: the World-2 (MONTAGNA) yeti-boss cues (preload 0x4122C8..,
+     * 0x40E350 handler). */
+    FA_SND_W2_BOSS_LAND,   /* w2sf04.wav lane 9  - the yeti lands from a hop  */
+    FA_SND_W2_BOSS_HURT,   /* w2sf05.wav lane 10 - the yeti takes a hit (fr69) */
 
     FA_SND__COUNT
 } fa_snd_event;

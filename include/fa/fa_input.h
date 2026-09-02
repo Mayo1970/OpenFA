@@ -43,6 +43,7 @@ struct fa_vfs;
  * indexed by the full 0..255 range; these are just the ones the port uses. */
 #define FA_DIK_ESCAPE   1
 #define FA_DIK_RETURN   28
+#define FA_DIK_BACK     14        /* Backspace */
 #define FA_DIK_A        30
 #define FA_DIK_S        31
 #define FA_DIK_D        32
@@ -124,6 +125,15 @@ void fa_input_set_pointer_speed(fa_input *in, float px_per_tick);
 int  fa_input_key_down(const fa_input *in, int dik);
 int  fa_input_key_pressed(const fa_input *in, int dik);   /* down edge  */
 int  fa_input_key_released(const fa_input *in, int dik);  /* up edge    */
+
+/*
+ * The printable ASCII character a DIK scancode produces for text entry (the
+ * high-score name field). Letters are always upper-case (the Schrift font
+ * folds case anyway); digits, space and '-' pass through. Any non-text key
+ * returns 0. The original reads the raw DirectInput array on that screen and
+ * maps it itself (0x4093A0); this is the port's equivalent table.
+ */
+char fa_input_text_char(int dik);
 int  fa_input_action_down(const fa_input *in, fa_action a);
 int  fa_input_action_pressed(const fa_input *in, fa_action a);
 

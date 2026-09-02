@@ -57,24 +57,35 @@ typedef struct {
     int             integer_scale;
 } sdl_state;
 
-/* SDL scancode -> DIK. Only the keys the port binds (RRR-40) plus the common
- * gameplay set; everything else is left 0. */
+/* SDL scancode -> DIK. The keys the port binds (RRR-40), the common gameplay
+ * set, and the full A-Z / 0-9 / space / '-' / '.' / Backspace range needed by
+ * the high-score name field; everything else is left 0. */
 static int sc_to_dik(SDL_Scancode sc)
 {
+    /* SDL_SCANCODE_A..Z are contiguous 4..29; DIK letter codes are not. */
+    static const unsigned char dik_az[26] = {
+        0x1E, 0x30, 0x2E, 0x20, 0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25,
+        0x26, 0x32, 0x31, 0x18, 0x19, 0x10, 0x13, 0x1F, 0x14, 0x16, 0x2F,
+        0x11, 0x2D, 0x15, 0x2C
+    };
+    if (sc >= SDL_SCANCODE_A && sc <= SDL_SCANCODE_Z)
+        return dik_az[sc - SDL_SCANCODE_A];
+    if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9)
+        return 0x02 + (sc - SDL_SCANCODE_1);   /* DIK 1..9 */
+
     switch (sc) {
+    case SDL_SCANCODE_0:           return 0x0B;
+    case SDL_SCANCODE_MINUS:       return 0x0C;
+    case SDL_SCANCODE_PERIOD:      return 0x34;
+    case SDL_SCANCODE_BACKSPACE:   return FA_DIK_BACK;
     case SDL_SCANCODE_ESCAPE:      return FA_DIK_ESCAPE;
-    case SDL_SCANCODE_RETURN:      return FA_DIK_RETURN;
+    case SDL_SCANCODE_RETURN:
+    case SDL_SCANCODE_KP_ENTER:    return FA_DIK_RETURN;
     case SDL_SCANCODE_SPACE:       return FA_DIK_SPACE;
     case SDL_SCANCODE_LEFT:        return FA_DIK_LEFT;
     case SDL_SCANCODE_RIGHT:       return FA_DIK_RIGHT;
     case SDL_SCANCODE_UP:          return FA_DIK_UP;
     case SDL_SCANCODE_DOWN:        return FA_DIK_DOWN;
-    case SDL_SCANCODE_A:           return FA_DIK_A;
-    case SDL_SCANCODE_S:           return FA_DIK_S;
-    case SDL_SCANCODE_D:           return FA_DIK_D;
-    case SDL_SCANCODE_F:           return FA_DIK_F;
-    case SDL_SCANCODE_P:           return FA_DIK_P;   /* free-move toggle (dev) */
-    case SDL_SCANCODE_I:           return FA_DIK_I;   /* skip to the boss (dev) */
     case SDL_SCANCODE_LCTRL:       return 29;   /* DIK_LCONTROL */
     case SDL_SCANCODE_LSHIFT:      return 42;   /* DIK_LSHIFT   */
     case SDL_SCANCODE_LALT:        return 56;   /* DIK_LMENU    */

@@ -215,14 +215,12 @@ static const snd_def SND_TBL[FA_SND__COUNT] = {
     [FA_SND_ENEMY_DIVE]      = { "SDat/papagei.wav", 8, 0 },
     [FA_SND_ENEMY_DIVE_EAGLE]= { "SDat/w2sf01.wav", 8, 0 },
     [FA_SND_ENEMY_DIVE_BEE]  = { "SDat/w1sf03.wav", 8, 0 },
-    /* exe: w3sf11 on ch 14 is the flying-robot positional loop (0x412EE0
-     * registers the emitter on slot 14); w3sf01 on ch 8 is the World-3
-     * whole-level ambient. */
-    [FA_SND_UFO]             = { "SDat/w3sf11.wav", 12, 1 },
-    [FA_SND_AMBIENT_W3]      = { "SDat/w3sf01.wav", 14, 1 },
-    /* the bee proximity loop (welt4), gated on a bee in view - see fa_slice
-     * bee_audio; the exe modulates it by distance (0x412EE0 emitter). */
-    [FA_SND_BEE_LOOP]        = { "SDat/w4sf03.wav", 14, 1 },
+    /* the three positional loops - slot numbers verified against the exe
+     * (preload dispatch 0x4121C7.., level-audio setup 0x412643). Each starts
+     * muted; fa_slice posloop_update rides the gain by distance. */
+    [FA_SND_UFO]             = { "SDat/w3sf11.wav", 14, 1 },  /* flying robot   */
+    [FA_SND_AMBIENT_W3]      = { "SDat/w3sf01.wav",  8, 1 },  /* electric floor */
+    [FA_SND_BEE_LOOP]        = { "SDat/w4sf03.wav", 14, 1 },  /* bee            */
     [FA_SND_HIT_P]        = { "SDat/voices/ita/pi0005.wav", 0, 0 },
     [FA_SND_HIT_M]        = { "SDat/voices/ita/ms0007.wav", 1, 0 },
     [FA_SND_MENU_HOVER]   = { "SDat/alsf08.wav",   2, 0 },
@@ -235,6 +233,11 @@ static const snd_def SND_TBL[FA_SND__COUNT] = {
     [FA_SND_W3_BOSS_KO]     = { "SDat/w3sf04b.wav",           10, 0 },
     [FA_SND_W4_BOSS_DRINK]  = { "SDat/w4sf01.wav",             9, 0 },
     [FA_SND_W4_BOSS_SHOT]   = { "SDat/w4sf02.wav",             9, 0 },
+    /* RRR-60: yeti boss. Preload 0x4122C8: w2sf05 handle -> ds:0x4DAC54
+     * (hurt grunt, exe ch 10), w2sf04 handle -> ds:0x4E0AA4 (landing thud,
+     * exe ch 9). */
+    [FA_SND_W2_BOSS_LAND]   = { "SDat/w2sf04.wav",             9, 0 },
+    [FA_SND_W2_BOSS_HURT]   = { "SDat/w2sf05.wav",            10, 0 },
 };
 
 /* ================================================================== *

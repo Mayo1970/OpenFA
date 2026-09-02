@@ -66,6 +66,9 @@ int fa_app_run(const fa_platform_cfg *cfg, const fa_app_cbs *cbs,
     int quit = 0;
     uint32_t carry_pressed = 0;   /* button down-edges held until a tick sees them */
     uint32_t carry_dbg = 0;       /* debug-key down-edges, same hold rule */
+    char     carry_text[8];       /* typed chars, same hold rule */
+    uint8_t  carry_text_n = 0;
+    uint8_t  carry_edit = 0;      /* backspace/enter/esc edges, same hold rule */
 
     const uint64_t frame_cap_ns = 1000000000ull / 240ull;  /* soft ceiling */
 
@@ -85,13 +88,29 @@ int fa_app_run(const fa_platform_cfg *cfg, const fa_app_cbs *cbs,
         if (fa_input_key_pressed(&in, FA_DIK_I)) carry_dbg |= FA_DBG_BOSS;
         actx.fi.dbg_pressed = carry_dbg;
 
+        /* name-entry text: printable key down-edges + the three edit keys */
+        for (int k = 0; k < 256 && carry_text_n < sizeof carry_text; k++) {
+            if (!fa_input_key_pressed(&in, k)) continue;
+            char c = fa_input_text_char(k);
+            if (c) carry_text[carry_text_n++] = c;
+        }
+        if (fa_input_key_pressed(&in, FA_DIK_BACK))   carry_edit |= FA_EDIT_BACKSPACE;
+        if (fa_input_key_pressed(&in, FA_DIK_RETURN)) carry_edit |= FA_EDIT_ENTER;
+        if (fa_input_key_pressed(&in, FA_DIK_ESCAPE)) carry_edit |= FA_EDIT_ESCAPE;
+        actx.fi.text_n = carry_text_n;
+        memcpy(actx.fi.text, carry_text, carry_text_n);
+        actx.fi.edit_pressed = carry_edit;
+
         uint64_t now = pf.vt->now_ns(&pf);
         uint64_t dt  = now - prev;
         prev = now;
 
         fa_loop_frame(&lp, dt, &actx.fi);
         clamped += (unsigned)lp.last_clamped;
-        if (lp.last_steps > 0) { carry_pressed = 0; carry_dbg = 0; }   /* a tick consumed the edge */
+        if (lp.last_steps > 0) {   /* a tick consumed the edges */
+            carry_pressed = 0; carry_dbg = 0;
+            carry_text_n = 0; carry_edit = 0;
+        }
 
         if (cbs->should_quit && cbs->should_quit(cbs->user)) quit = 1;
 

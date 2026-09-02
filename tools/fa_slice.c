@@ -287,6 +287,16 @@ static void beh_sfx(int ev, int obj, void *ctx)
         case FA_BEH_SFX_BOSS_KO_ANIM:                   /* RRR-61 robot: RBKO fr56 */
             if (obj == 14) fa_audio_event(s->audio, FA_SND_W3_BOSS_KO);
             break;
+        case FA_BEH_SFX_BOSS_LAND:                      /* RRR-60 yeti: hop land  */
+            if (obj == 9) fa_audio_event(s->audio, FA_SND_W2_BOSS_LAND);
+            break;
+        case FA_BEH_SFX_BOSS_HURT:                      /* RRR-60 yeti: hit fr69  */
+            if (obj == 9) fa_audio_event(s->audio, FA_SND_W2_BOSS_HURT);
+            break;
+        case FA_BEH_SFX_BOSS_VOICE_CUT:                 /* RRR-60 yeti: hit cuts   */
+            fa_audio_stop(s->audio, FA_CH_VOICE);       /* the roar/taunt line     */
+            fa_audio_stop(s->audio, FA_CH_BOSS);
+            break;
         case FA_BEH_SFX_BOSS_KO:
             if (obj == 14) { fa_audio_event(s->audio, FA_SND_W3_BOSS_DEFEAT); break; }
             /* fall through */
@@ -328,19 +338,32 @@ static void beh_sfx(int ev, int obj, void *ctx)
     }
 }
 
-/* Kinder Paradiso voice line (0x415550 plays it on channel 0x11 = lane 17). */
+/*
+ * A streamed voice line. The exe splits these across two lanes: the Kinder
+ * Paradiso mascot streams on channel 0x11 = lane 17 (0x415550), the world
+ * bosses on channel 0x12 = lane 18 (0x40E350 etc). Route by the file stem -
+ * gb/yb/rb/ob NNNN are boss lines, pa/pat NNNN are the mascot.
+ */
 static void beh_voice(const char *rel_wav, void *ctx)
 {
     slice *s = (slice *)ctx;
     if (!rel_wav) return;
+    const char *base = strrchr(rel_wav, '/');
+    base = base ? base + 1 : rel_wav;
+    int c0 = base[0] | 0x20, c1 = base[1] | 0x20;   /* fold case */
+    int boss = c1 == 'b' &&
+               (c0 == 'g' || c0 == 'y' || c0 == 'r' || c0 == 'o');
+    int lane = boss ? FA_CH_BOSS : FA_CH_VOICE;
     printf("voice -> %s\n", rel_wav);   /* console cue (Paradiso / boss) */
-    if (s->audio) fa_audio_play_stream(s->audio, rel_wav, 17, 0);
+    if (s->audio) fa_audio_play_stream(s->audio, rel_wav, lane, 0);
 }
 
 static int beh_voice_busy(void *ctx)
 {
     slice *s = (slice *)ctx;
-    return s->audio ? fa_audio_channel_busy(s->audio, 17) : 0;
+    if (!s->audio) return 0;
+    return fa_audio_channel_busy(s->audio, FA_CH_VOICE) ||
+           fa_audio_channel_busy(s->audio, FA_CH_BOSS);
 }
 
 /*
@@ -363,17 +386,27 @@ static void beh_tutorial_done(void *ctx)
     s->tut_reload_pending = 1;
 }
 
-/* per-world ambient loop (0x412643..0x4126DD): World 3 loops w3sf01 on ch 14.
- * World 4's w4sf03 is NOT an ambient - it is the bee proximity loop, gated
- * per-tick by bee_audio(). (The flying-robot loop is ufo_audio() below.) */
+/*
+ * Arm the world's positional loops (exe level-audio setup 0x412643). World 3
+ * starts w3sf01 on slot 8 (electric floor) and w3sf11 on slot 14 (flying
+ * robot); world 4 starts w4sf03 on slot 14 (bee). Each starts muted -
+ * slice_posloops() rides the volume by distance every tick. Worlds 1/2 have
+ * no positional loop; the slots stay clear.
+ */
 static void set_world_ambient(slice *s, int world)
 {
-    (void)world;
     if (!s->audio) return;
-    fa_audio_stop(s->audio, 12);
+    fa_audio_stop(s->audio, 8);
     fa_audio_stop(s->audio, 14);
-    /* World 3's w3sf01 is the electric-floor loop, not a whole-level ambient.
-     * It is gated per-tick by elec_audio(). */
+    if (world == 3) {
+        fa_audio_event(s->audio, FA_SND_AMBIENT_W3);   /* w3sf01 slot 8  */
+        fa_audio_event(s->audio, FA_SND_UFO);          /* w3sf11 slot 14 */
+        fa_audio_set_channel_gain(s->audio, 8, 0);
+        fa_audio_set_channel_gain(s->audio, 14, 0);
+    } else if (world == 4) {
+        fa_audio_event(s->audio, FA_SND_BEE_LOOP);     /* w4sf03 slot 14 */
+        fa_audio_set_channel_gain(s->audio, 14, 0);
+    }
 }
 
 /* stop every looping / one-shot SFX lane plus the voice channels. Called on
@@ -387,75 +420,80 @@ static void slice_audio_hush(slice *s)
     fa_audio_stop(s->audio, FA_CH_BOSS);
 }
 
-/* the electric-floor loop (w3sf01): plays while any electric-floor object
- * (ObjNr 355 f_elektro_gr / 356 f_elektro_kl) is inside the camera view,
- * silent otherwise - the same in-view gate as the UFO / bee loops. */
-static void elec_audio(slice *s)
+/* ================================================================== *
+ *  Positional loops  (exe emitter 0x412EE0 + volume pass 0x41139D)
+ *
+ *  The exe keeps one looping WAV per slot running for the whole level and
+ *  sets its volume each frame from the minimum squared distance, in screen
+ *  pixels, between screen centre (FA_FB_W/2, FA_FB_H/2) and the four corners
+ *  of any live emitter's sprite box. A corner past a +/-1200 x / +/-900 y
+ *  window of centre is ignored (0x412EE0). Volume curve (0x41139D): 0 dB
+ *  within 350 px, a ramp linear in distance^2 to about -50 dB by 1063 px,
+ *  then silence. The loop is never stopped mid-level - a far emitter is just
+ *  gain 0.
+ * ================================================================== */
+#define POSLOOP_FULL_PX   350   /* <= : full volume                          */
+#define POSLOOP_FADE_PX  1063   /* >= : muted (sqrt of the exe's 0x113E10)   */
+#define POSLOOP_CULL_X   1200   /* corner ignored past this |dx| ...         */
+#define POSLOOP_CULL_Y    900   /* ... or this |dy| (exe 0x412EE0)           */
+
+/* min squared distance -> lane gain (/256). The exe ramps a dB value
+ * linearly in distance^2 from 0 to ~-50 across the band, then hard-mutes;
+ * DirectSound turns that dB into amplitude, and so do we. */
+static int posloop_gain(long d2)
 {
-    if (!s->audio || !s->ents || s->world != 3) return;
-    int in_view = 0;
-    int n = fa_entity_count(s->ents);
-    for (int i = 0; i < n; i++) {
-        const fa_entity_rec *e = fa_entity_at(s->ents, i);
-        if (!e || !e->active || (e->obj_nr != 355 && e->obj_nr != 356)) continue;
-        int x0, y0, x1, y1;
-        if (fa_entity_frame_box(s->ents, i, &x0, &y0, &x1, &y1) != 0) {
-            x0 = x1 = e->x; y0 = y1 = e->y;
-        }
-        if (x1 >= s->cam.x && x0 <= s->cam.x + FA_FB_W &&
-            y1 >= s->cam.y && y0 <= s->cam.y + FA_FB_H) { in_view = 1; break; }
-    }
-    int playing = fa_audio_channel_busy(s->audio, 14);
-    if (in_view && !playing)      fa_audio_event(s->audio, FA_SND_AMBIENT_W3);
-    else if (!in_view && playing) fa_audio_stop(s->audio, 14);
+    long full = (long)POSLOOP_FULL_PX * POSLOOP_FULL_PX;
+    long fade = (long)POSLOOP_FADE_PX * POSLOOP_FADE_PX;
+    if (d2 <= full) return 256;
+    if (d2 >= fade) return 0;
+    double t  = (double)(d2 - full) / (double)(fade - full);   /* 0..1     */
+    double db = -50.0 * t;                                     /* exe ramp */
+    int g = (int)(256.0 * pow(10.0, db / 20.0) + 0.5);
+    return g < 0 ? 0 : (g > 256 ? 256 : g);
 }
 
-/* the bee proximity loop (w4sf03, welt4 only): plays while ANY bee (ObjNr 16)
- * is inside the camera view, silent otherwise - the same in-view gate as the
- * flying-robot loop. The exe starts it on world-4 load at volume -100 and
- * raises it by distance to the nearest bee (0x40BBA0 -> 0x412EE0 emitter);
- * this port does the binary on/off the owner confirmed for the UFO. */
-static void bee_audio(slice *s)
-{
-    if (!s->audio || !s->ents || s->world != 4) return;
-    int in_view = 0;
-    int n = fa_entity_count(s->ents);
-    for (int i = 0; i < n; i++) {
-        const fa_entity_rec *e = fa_entity_at(s->ents, i);
-        if (!e || !e->active || e->obj_nr != 16) continue;
-        int x0, y0, x1, y1;
-        if (fa_entity_frame_box(s->ents, i, &x0, &y0, &x1, &y1) != 0) {
-            x0 = x1 = e->x; y0 = y1 = e->y;
-        }
-        if (x1 >= s->cam.x && x0 <= s->cam.x + FA_FB_W &&
-            y1 >= s->cam.y && y0 <= s->cam.y + FA_FB_H) { in_view = 1; break; }
-    }
-    int playing = fa_audio_channel_busy(s->audio, 14);
-    if (in_view && !playing)      fa_audio_event(s->audio, FA_SND_BEE_LOOP);
-    else if (!in_view && playing) fa_audio_stop(s->audio, 14);
-}
-
-/* the flying-robot loop (w3sf01): plays while ANY flying robot is inside the
- * camera view (the exe registers the emitter from the robot's on-screen
- * tick), silent otherwise. Owner: "playing the moment the ufo is IN view". */
-static void ufo_audio(slice *s)
+/* Ride `lane`'s gain from the nearest live emitter of ObjNr `o1` (or `o2`,
+ * -1 to skip). `guard` = 1 gates each emitter on fa_beh_emitter_live (the exe
+ * rec[0x62] < 100 flyer guard); 0 = any active record emits (the electric
+ * floor runs for the whole level once spawned). */
+static void posloop_update(slice *s, int o1, int o2, int lane, int guard)
 {
     if (!s->audio || !s->ents) return;
-    int in_view = 0;
+    long cx = (long)s->cam.x + FA_FB_W / 2;
+    long cy = (long)s->cam.y + FA_FB_H / 2;
+    long best = -1;
     int n = fa_entity_count(s->ents);
     for (int i = 0; i < n; i++) {
         const fa_entity_rec *e = fa_entity_at(s->ents, i);
-        if (!e || !e->active || e->obj_nr != 13) continue;
+        if (!e || !e->active) continue;
+        if (e->obj_nr != o1 && e->obj_nr != o2) continue;
+        if (guard && s->beh && !fa_beh_emitter_live(s->beh, i)) continue;
         int x0, y0, x1, y1;
         if (fa_entity_frame_box(s->ents, i, &x0, &y0, &x1, &y1) != 0) {
             x0 = x1 = e->x; y0 = y1 = e->y;
         }
-        if (x1 >= s->cam.x && x0 <= s->cam.x + FA_FB_W &&
-            y1 >= s->cam.y && y0 <= s->cam.y + FA_FB_H) { in_view = 1; break; }
+        const int cxs[4] = { x0, x1, x0, x1 };
+        const int cys[4] = { y0, y0, y1, y1 };
+        for (int k = 0; k < 4; k++) {
+            long dx = cxs[k] - cx, dy = cys[k] - cy;
+            if (dx < -POSLOOP_CULL_X || dx > POSLOOP_CULL_X) continue;
+            if (dy < -POSLOOP_CULL_Y || dy > POSLOOP_CULL_Y) continue;
+            long d2 = dx * dx + dy * dy;
+            if (best < 0 || d2 < best) best = d2;
+        }
     }
-    int playing = fa_audio_channel_busy(s->audio, 12);
-    if (in_view && !playing)      fa_audio_event(s->audio, FA_SND_UFO);
-    else if (!in_view && playing) fa_audio_stop(s->audio, 12);
+    fa_audio_set_channel_gain(s->audio, lane, best < 0 ? 0 : posloop_gain(best));
+}
+
+/* per-tick: drive whichever positional loops this world armed. */
+static void slice_posloops(slice *s)
+{
+    if (s->world == 3) {
+        posloop_update(s, 355, 356,  8, 0);   /* electric floor -> w3sf01 */
+        posloop_update(s,  13,  -1, 14, 1);   /* flying robot   -> w3sf11 */
+    } else if (s->world == 4) {
+        posloop_update(s,  16,  -1, 14, 1);   /* bee            -> w4sf03 */
+    }
 }
 
 /*
@@ -751,10 +789,10 @@ static void begin_after_death(slice *s, int won)
 
     s->scores = fa_hiscore_load(s->gdata);
     if (s->scores) {
-        fa_hiscore_set_world(s->scores, s->world - 1);   /* 0..3 */
-        /* the run was in a world - show that world's boss portrait, as the
-         * exe does on scene 15 (Gegner.w01 frame 0x4DABD4). */
-        fa_hiscore_set_boss_pic(s->scores, s->world - 1);
+        /* the run was in a world: show that world's table + boss portrait
+         * (Gegner.w01 frame 0x4DABD4), and offer the run's score to the
+         * table - it becomes an editable name row if it places. */
+        fa_hiscore_begin(s->scores, s->world - 1, s->score, 1);
     } else {
         s->menu = fa_menu_load(s->gdata);                /* no assets: menu */
     }
@@ -821,10 +859,31 @@ static void s_sim(uint64_t tick, const void *input, void *user)
     if (s->show_scores && !s->scores) {
         s->scores = fa_hiscore_load(s->gdata);
         s->show_scores = 0;
-        if (!s->scores) { /* no assets: silently stay on the menu */ }
+        if (s->scores)                       /* from the menu: plain view */
+            fa_hiscore_begin(s->scores, 0, -1, 0);
     }
     if (s->scores) {
-        if (fi->btn_pressed & 1u) {          /* click anywhere -> back */
+        fa_hiscore_in hi;
+        memset(&hi, 0, sizeof hi);
+        hi.ptr_x     = fi->ptr_x;
+        hi.ptr_y     = fi->ptr_y;
+        hi.click     = (fi->btn_pressed & 1u) != 0;
+        hi.text      = (const char *)fi->text;
+        hi.text_n    = fi->text_n;
+        hi.backspace = (fi->edit_pressed & FA_EDIT_BACKSPACE) != 0;
+        hi.enter     = (fi->edit_pressed & FA_EDIT_ENTER) != 0;
+        hi.escape    = (fi->edit_pressed & FA_EDIT_ESCAPE) != 0;
+
+        fa_hiscore_ev he;
+        fa_hiscore_tick(s->scores, &hi, &he);
+
+        if (he.hover_sound && s->audio)
+            fa_audio_event(s->audio, FA_SND_MENU_HOVER);   /* alsf08 (PL-118) */
+
+        if (he.wrote)   /* fa_hiscore persisted user:Highscore{n}.dat (RRR-39) */
+            printf("high score entered -> Highscore%d.dat\n", he.wrote_world + 1);
+
+        if (he.leave) {
             fa_hiscore_free(s->scores);
             s->scores = NULL;
             if (!s->menu) {                  /* came from a death */
@@ -896,9 +955,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             if (s->ents)
                 fa_entity_tick(s->ents, s->cam.x, s->cam.y, FA_FB_W, FA_FB_H);
             if (s->beh) { int kb = 0; (void)fa_beh_post(s->beh, &kb); }
-            ufo_audio(s);
-            bee_audio(s);
-            elec_audio(s);
+            slice_posloops(s);
             fa_player_tick(&s->pl, 0);          /* no input; body settles */
             fa_camera_follow(&s->cam, fa_player_px(&s->pl), fa_player_py(&s->pl));
             if (s->have_kids) {
@@ -1063,9 +1120,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
              * reads player vy); only the 120-tick i-frames suppress it. */
             int kb = 0;
             int dmg = s->beh ? fa_beh_post(s->beh, &kb) : 0;
-            ufo_audio(s);
-            bee_audio(s);
-            elec_audio(s);
+            slice_posloops(s);
             if (dmg && s->hurt_cd == 0 && !s->freemove) {
                 s->health -= dmg;
                 s->hurt_cd = 120;              /* 0x41A538: 0x78 ticks */

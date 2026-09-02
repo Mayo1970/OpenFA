@@ -67,8 +67,14 @@ enum {
     FA_BEH_SFX_BROESEL_BREAK,  /* a crumbling platform broke (0x422B60 id 6,
                                 * knusper.wav, slot 6)                       */
     FA_BEH_SFX_BOSS_CHARGE,    /* RRR-61: the robot boss winds up to fire   */
-    FA_BEH_SFX_BOSS_KO_ANIM    /* RRR-61: a beat inside the boss KO anim
+    FA_BEH_SFX_BOSS_KO_ANIM,   /* RRR-61: a beat inside the boss KO anim
                                 * (robot: w3sf04b ch10 at RBKO frame 56)    */
+    FA_BEH_SFX_BOSS_LAND,      /* RRR-60: the yeti hop landing thud
+                                * (w2sf04 ch9, exe 0x40E6BE / 0x40EA9F)     */
+    FA_BEH_SFX_BOSS_HURT,      /* RRR-60: the yeti hurt grunt
+                                * (w2sf05 ch10, exe 0x40EA0D at hit fr 69)  */
+    FA_BEH_SFX_BOSS_VOICE_CUT  /* RRR-60: a hit cuts the boss voice line
+                                * (exe 0x40E5DB stop channel 18)            */
 };
 
 typedef struct fa_beh_hooks {
@@ -165,6 +171,15 @@ int fa_beh_push_carry(fa_beh *b, int probe_x, int probe_y);
 /* Introspection for tests / the HUD. */
 int fa_beh_enemies_alive(const fa_beh *b);
 int fa_beh_projectiles_live(const fa_beh *b);
+
+/*
+ * 1 while the enemy at store index `i` is a flyer that feeds a positional
+ * audio emitter AND is in an emitting state: the exe's rec[0x62] < 100 gate
+ * on the bee (0x40BBA0) and the flying robot (0x4106C0) - alive, not in the
+ * hit / launch / spent phases. 0 for any other object or a downed flyer. The
+ * host's positional-loop mixer polls this per tick (see fa_slice posloop_update).
+ */
+int fa_beh_emitter_live(const fa_beh *b, int i);
 
 /* Enemy projectile slot `i` (0..FA_BEH_PROJ_MAX-1): 1 and fills the world
  * pixel centre if it is live, 0 otherwise. For the host renderer. */

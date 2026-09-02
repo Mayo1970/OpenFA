@@ -44,11 +44,23 @@ typedef struct fa_frame_input {
     uint32_t dbg_pressed;    /* debug-key down edges, carried until a tick
                               * consumes them. bit 0 = FA_DBG_FREEMOVE (P),
                               * bit 1 = FA_DBG_BOSS (I). */
+
+    /* Text entry for the high-score name field. Printable chars typed since
+     * the last sim tick (not NUL-terminated; `text_n` is the count), plus the
+     * edit-key down edges. Carried across 0-tick frames like btn_pressed. */
+    char     text[8];
+    uint8_t  text_n;
+    uint8_t  edit_pressed;   /* FA_EDIT_* bits */
 } fa_frame_input;
 
 /* Debug-key edge bits in fa_frame_input.dbg_pressed (dev tooling only). */
 #define FA_DBG_FREEMOVE  (1u << 0)   /* P: toggle free / no-clip movement */
 #define FA_DBG_BOSS      (1u << 1)   /* I: skip straight to the boss arena */
+
+/* Edit-key edge bits in fa_frame_input.edit_pressed (name entry). */
+#define FA_EDIT_BACKSPACE (1u << 0)
+#define FA_EDIT_ENTER     (1u << 1)
+#define FA_EDIT_ESCAPE    (1u << 2)
 
 typedef struct fa_app_cbs {
     /* One fixed 60 Hz tick. `input` points at a fa_frame_input. */

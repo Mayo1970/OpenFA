@@ -43,7 +43,7 @@ This game had **two** releases: one with each level you could find separately (f
 ## Known issues
 These issues will be addressed in the polish phase, but still worth noting.
 - Some background noises aren't placed properly
-- Some bosses don't have their behavior implemented yet.
+- Some things feel wrong (ex. climbing)
 
 ## Build
 
@@ -59,3 +59,19 @@ The decoders are linked in and run at load; path lookups apply the case/encoding
 
 The engine refuses to start without a valid `GData` tree. Nothing in this
 repository contains or reproduces game assets.
+
+## AI disclosure
+
+Parts of this project were developed with AI assistance (Claude).
+I reviewed, tested, and approved all changes before they were merged. Played through every level from start to finish to ensure they played as close as the original game, as well as applying a few changes myself to improve the overall user experience.
+
+## Credits
+
+- *Kinder & Ferrero - Fresh Adventures* — original game by its respective rights holders. All game assets remain their property.
+
+## License
+
+The OpenFA engine code is released under the MIT License. See the `LICENSE` file for the full text.
+
+This license covers only the engine source in this repository.
+It does not cover any game assets, which you must own separately.

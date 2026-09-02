@@ -872,10 +872,13 @@ static int yeti_hop(fa_entity_rec *e)
     return 0;
 }
 
-/* RRR-60: the yeti landed - trigger the ceiling icicles (exe 0x40E6D4) and
- * re-arm the ice block (0x40E6F6). */
+/* RRR-60: the yeti landed - play the thud (exe 0x40E6BE: ds:0x4E0AA4 on
+ * channel 9), trigger the ceiling icicles (0x40E6D4) and re-arm the ice
+ * block (0x40E6F6). Fires on every hop landing - the idle hop and the
+ * hit-recoil jump both run this block. */
 static void yeti_landed(fa_beh *b)
 {
+    if (b->h.sfx) b->h.sfx(FA_BEH_SFX_BOSS_LAND, 9, b->h.user);
     if (b->icicle_mask == 0)
         b->icicle_mask = ICICLE_PAT[brand(b, 9)];
     if (b->ib_phase == 3)
@@ -929,10 +932,11 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
                 e->anim_timer = 3;
                 e->bs[BS_RT]  = brand(b, 30);       /* timer A: first act      */
                 e->bs[BS_RNG] = 40 + brand(b, 180); /* timer B: first roar     */
-                pd_range(e, 38, 52, 0);      /* "Laber gedreht" 38..52        */
+                e->bs[BS_KT]  = 0;                  /* talk sub-phase (0x40E7E8)*/
+                pd_range(e, 38, 46, 0);      /* "Laber gedreht" mouth loop    */
                 if (b->h.voice) b->h.voice(YB_INTRO, b->h.user);
                 b->icicle_mask = 0;
-                b->ib_phase = 0;             /* the ice block sets it to 1    */
+                b->ib_phase = 0;             /* the block sets it to 1 on land */
             } else if (e->obj_nr == 14) {    /* robot: intro talk first       */
                 e->bs[BS_LS] = 320;
                 e->flip_x = 0;
@@ -1292,17 +1296,21 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
          *   0x41A5E0(body, flag 1) in states 1 & 3: any ball in the box is
          *     eaten; ret==2 (a non-0x105 = dirty ball) -> hit (-> exe state 100)
          * yeti.jrs frames: KO 0..22, KICK 23..37, "Laber gedreht" (turned talk)
-         *   38..52, "Laber" 53..67, Jump 68..95. 0x430B20 id 0 = Left(38..52),
-         *   id 1 = Right(68..95). Exe state 1 freezes on frame 38.
+         *   38..52 (mouth loop 42..46), "Laber" 53..67, Jump 68..95. Exe state 1
+         *   freezes on frame 38.
          * States (ours -> exe):
-         *   320 intro <- 0/50/51 : talk 38..52 while YB0001 plays -> 340
+         *   320 talk  <- 50/51/52: 38..46, loop 42..46 while the voice runs,
+         *                          then 46..52 -> 340; act timer = rand()%30
          *   340 idle  <- 1       : FROZEN on frame 38; RT -> kick/hop;
-         *                          RNG -> roar (YB0002/3) + replay the talk
-         *   350 kick  <- 3       : KICK 23..37 -> 340    (still vulnerable)
-         *   360 hop   <- 5       : Jump 83..95, real leap (vy -12) on frame 88
-         *   300 hit   <- 100/101 : startled full jump 68..95, then --HP;
+         *                          RNG -> roar (YB0002/3) -> 320
+         *   350 kick  <- 3       : KICK 23..37 -> 340 (still vulnerable);
+         *                          act timer on return = rand()%60 + 60
+         *   360 hop   <- 5       : Jump 83..95, real leap (vy -12) on frame 88;
+         *                          land -> thud + icicles; return = rand()%60+60
+         *   300 hit   <- 100/101 : startled jump 68..95, grunt at fr 69, --HP;
          *                          <0 -> defeat, else taunt YB0004..8 -> 320
-         *   310 dead  <- 110/0x40EC0B : KO 0..22, held --- */
+         *   310 dead  <- 110/0x40EC0B : KO 0..22, then slump off under gravity,
+         *                          record removed after 120 ticks --- */
         if (e->obj_nr == 9) {
             int bx0 = e->x + 20, bx1 = e->x + 154;
             int by0 = e->y + 20, by1 = e->y + 282;
@@ -1313,26 +1321,49 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
                 snow_hit(b, bx0,by0,bx1,by1) && b->ammo_dirty) {
                 e->bs[BS_LS] = 300;
                 e->bs[BS_AF] = 0;
+                e->bs[BS_N]  = 0;                 /* frame-69 grunt latch     */
                 pd_range(e, 68, 95, 0);            /* startled full jump      */
-                if (b->h.sfx) b->h.sfx(FA_BEH_SFX_BOSS_HIT, 9, b->h.user);
+                /* exe 0x40E5DB: a hit cuts the roar / taunt voice line.
+                 * The hurt grunt plays later, at anim frame 69 (0x40EA0D). */
+                if (b->h.sfx) b->h.sfx(FA_BEH_SFX_BOSS_VOICE_CUT, 9, b->h.user);
                 touch_player(b, bx0,by0,bx1,by1);
                 return 0;
             }
 
             switch (e->bs[BS_LS]) {
-            case 310:                               /* defeated: hold KO      */
-                e->frame = e->anim_last;
+            case 310:                               /* defeated (exe st 110)  */
+                /* KO 0..22 plays once; meanwhile the body keeps falling under
+                 * gravity (exe 0x40EC65 - it slumps off the ice shelf), and
+                 * the record is removed after 120 ticks (0x40EC11 rec[0x74]). */
+                if (e->frame >= e->anim_last) {
+                    e->frame = e->anim_last;
+                    e->anim_first = e->anim_last;
+                }
+                e->bs[BS_VY] += FX_0_6;
+                if (e->bs[BS_VY] > FX_20_0) e->bs[BS_VY] = FX_20_0;
+                e->bs[BS_FY] += e->bs[BS_VY];
+                e->y = fx_round(e->bs[BS_FY]);
+                if (--e->bs[BS_KT] <= 0) e->active = 0;
                 return 0;
 
-            case 320:                               /* talk 38..52 + YB0001   */
-                if ((!b->h.voice_busy || !b->h.voice_busy(b->h.user)) &&
-                    (wrapped || e->frame >= 52)) {
-                    e->bs[BS_LS] = 340;
-                    e->bs[BS_RT] = 60 + brand(b, 60);
-                    pd_range(e, 38, 38, 0);         /* freeze on frame 38     */
+            case 320: {                             /* talk (exe st 50/51/52) */
+                int done = !b->h.voice_busy || !b->h.voice_busy(b->h.user);
+                if (e->bs[BS_KT] == 0) {            /* mouth loop while talking */
+                    if (done) {
+                        e->bs[BS_KT] = 1;
+                        pd_range(e, 46, 52, 0);     /* play out the turn       */
+                    } else if (wrapped) {
+                        e->anim_first = 42;         /* tighten to 42..46 (0x40E94F) */
+                    }
+                } else if (wrapped || e->frame >= 52) {
+                    e->bs[BS_KT]  = 0;
+                    e->bs[BS_LS]  = 340;
+                    e->bs[BS_RT]  = brand(b, 30);   /* exe 0x40E7E8: rand()%30 */
+                    pd_range(e, 38, 38, 0);         /* freeze on frame 38      */
                 }
                 touch_player(b, bx0,by0,bx1,by1);
                 return 0;
+            }
 
             case 350:                               /* KICK 23..37            */
                 /* frame 32: fire the floor ice block (exe 0x40E611) */
@@ -1361,7 +1392,11 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
                 return 0;
             }
 
-            case 300: {                             /* took a hit (jumps)     */
+            case 300: {                             /* took a hit (exe st 100) */
+                if (e->frame >= 69 && !e->bs[BS_N]) {
+                    e->bs[BS_N] = 1;               /* exe 0x40EA0D: grunt fr 69 */
+                    if (b->h.sfx) b->h.sfx(FA_BEH_SFX_BOSS_HURT, 9, b->h.user);
+                }
                 int r = yeti_hop(e);
                 if (r == 2) yeti_landed(b);
                 if (r && (wrapped || e->frame >= 95 || e->anim_first >= 95)) {
@@ -1371,16 +1406,19 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
                         b->boss_defeated = 1;
                         e->bs[BS_LS] = 310;
                         e->collision_enabled = 0;
-                        pd_range(e, 0, 22, 0);      /* KO range               */
+                        e->bs[BS_FY] = (int32_t)e->y << 16;  /* slump-off start */
+                        e->bs[BS_VY] = 0;
+                        e->bs[BS_KT] = 120;        /* exe rec[0x74] = 0x78    */
+                        pd_range(e, 0, 22, 0);     /* KO range               */
                         if (b->h.score) b->h.score(10000, b->h.user);
                         if (b->h.sfx)
                             b->h.sfx(FA_BEH_SFX_BOSS_KO, 9, b->h.user);
-                    } else {
-                        if (b->h.voice)
-                            b->h.voice(YB_TAUNT[brand(b, 5)], b->h.user);
-                        e->bs[BS_LS] = 320;
-                        pd_range(e, 38, 52, 0);
+                        return 0;
                     }
+                    if (b->h.voice)
+                        b->h.voice(YB_TAUNT[brand(b, 5)], b->h.user);
+                    e->bs[BS_LS] = 320;
+                    pd_range(e, 38, 46, 0);
                 }
                 touch_player(b, e->x + 20, e->y + 20, e->x + 154, e->y + 282);
                 return 0;
@@ -1391,8 +1429,9 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
                     (!b->h.voice_busy || !b->h.voice_busy(b->h.user))) {
                     if (b->h.voice) b->h.voice(YB_ROAR[brand(b, 2)], b->h.user);
                     e->bs[BS_RNG] = 600 + brand(b, 200);
+                    e->bs[BS_KT]  = 0;             /* talk sub-phase           */
                     e->bs[BS_LS]  = 320;
-                    pd_range(e, 38, 52, 0);
+                    pd_range(e, 38, 46, 0);
                     touch_player(b, bx0,by0,bx1,by1);
                     return 0;
                 }
@@ -1791,8 +1830,11 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
  * ================================================================
  * The exe hides it above the screen (state 0 sets rec.Y = -200), holds until
  * the boss-defeated flag ds:0x4DAB18 is set (state 1), then drops it straight
- * down under gravity 0.6 (state 2) to land on the terrain (state 3). Catching
- * it (0x41A3E0 overlap) awards +10000 and ends the level (owner: -> CLASSIFICA).
+ * down under gravity 0.6 (state 2). It lands when the SPRITE BOTTOM EDGE meets
+ * solid ground - exe 0x40F8E7: 0x434180(plane 2, rec.X + frameW/2,
+ * rec.Y + frameH). Checking the record origin instead sinks the whole sprite
+ * underground (Welt2E floor is ~90 px below the drop column). Catching it
+ * (0x41A3E0 overlap) awards +10000 and ends the level (owner: -> CLASSIFICA).
  */
 enum { I7_WAIT, I7_FALL, I7_LAND };
 
@@ -1826,7 +1868,15 @@ static int beh_i7(fa_entity_rec *e, int wrapped, void *ctx)
         if (e->bs[BS_VY] > FX_20_0) e->bs[BS_VY] = FX_20_0;
         e->bs[BS_FY] += e->bs[BS_VY];
         e->y = fx_round(e->bs[BS_FY]);
-        if (b->h.terrain && b->h.terrain(e->x, e->y, b->h.user) == 1) {
+        /* exe 0x40F8E7: land when the sprite BOTTOM meets solid, not the
+         * record origin (which buries the whole sprite). */
+        int px = e->x + 32, py = e->y + 89, bx0, by0, bx1, by1;
+        if (fa_entity_frame_box(b->store, rec_index(b, e),
+                                &bx0, &by0, &bx1, &by1) == 0) {
+            px = (bx0 + bx1) / 2;
+            py = by1;
+        }
+        if (b->h.terrain && b->h.terrain(px, py, b->h.user) == 1) {
             e->bs[BS_VY] = 0;
             e->bs[BS_LS] = I7_LAND;
             e->force_offscreen = 0;
@@ -1859,6 +1909,10 @@ static int beh_i7(fa_entity_rec *e, int wrapped, void *ctx)
  * is off the left edge (b->ib_phase -> 3); the yeti's next HOP-landing rearms
  * it (b->ib_phase -> 0) - it drops back in from its placed position and, once
  * it hits the floor again, is ready for the next kick (exe state 4 -> state 1).
+ *
+ * ib_phase (ds:0x4E0B24) becomes 1 ONLY when the block has landed on the floor
+ * (exe state 1 -> 0x414B7F). While it is still dropping in, ib_phase stays 0,
+ * so the idle yeti hops instead of kicking at a block that is not down yet.
  */
 enum { ICB_FALL = 0, ICB_WAIT, ICB_SLIDE, ICB_SPENT };
 
@@ -1883,8 +1937,7 @@ static int beh_iceblock(fa_entity_rec *e, int wrapped, void *ctx)
         e->bs[BS_N]  = e->y;
         e->automove = 0;
         e->collision_enabled = 0;
-        iceblock_drop(e);
-        b->ib_phase = 1;                   /* tell the yeti a block is ready   */
+        iceblock_drop(e);                  /* ib_phase set on landing, not here */
         return 0;
     }
 
@@ -1897,6 +1950,7 @@ static int beh_iceblock(fa_entity_rec *e, int wrapped, void *ctx)
         if (b->h.terrain && b->h.terrain(e->x, e->y + 20, b->h.user) == 1) {
             e->bs[BS_VY] = 0;
             e->bs[BS_LS] = ICB_WAIT;                    /* -> ready for a kick */
+            b->ib_phase = 1;               /* exe 0x414B7F: block is down       */
         }
         break;
 
@@ -1916,8 +1970,7 @@ static int beh_iceblock(fa_entity_rec *e, int wrapped, void *ctx)
 
     default: /* ICB_SPENT */
         if (b->ib_phase == 0) {                         /* the yeti hopped   */
-            iceblock_drop(e);                           /* fall in again     */
-            b->ib_phase = 1;
+            iceblock_drop(e);          /* re-fall; ICB_FALL sets ib_phase = 1 */
         }
         break;
     }
@@ -1960,8 +2013,8 @@ static int beh_icicle(fa_entity_rec *e, int wrapped, void *ctx)
         break;
 
     case ICI_SHIVER:
-        e->x = e->bs[BS_FX] + brand(b, 3) - 1;          /* rattle +/-1 px    */
-        e->y = e->bs[BS_N]  + brand(b, 3) - 1;
+        e->x = e->bs[BS_FX] + brand(b, 3);   /* exe 0x414875: home + rand()%3 */
+        e->y = e->bs[BS_N]  + brand(b, 3);
         if (--e->bs[BS_KT] <= 0) {
             e->x = e->bs[BS_FX];
             e->y = e->bs[BS_N];
@@ -2395,6 +2448,15 @@ int fa_beh_projectiles_live(const fa_beh *b)
     int n = 0;
     for (int i = 0; i < FA_BEH_MAX_PROJ; i++) if (b->proj[i].alive) n++;
     return n;
+}
+
+int fa_beh_emitter_live(const fa_beh *b, int i)
+{
+    if (!b) return 0;
+    const fa_entity_rec *e = fa_entity_at(b->store, i);
+    if (!e || !e->active) return 0;
+    if (e->obj_nr != 13 && e->obj_nr != 16) return 0;   /* flying robot / bee */
+    return e->bs[BS_LS] < 100;   /* exe rec[0x62] < 0x64: not hit/launch/spent */
 }
 
 int fa_beh_boss_hp(const fa_beh *b) { return b ? b->boss_hp : -1; }

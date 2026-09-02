@@ -54,14 +54,16 @@ $CC $CFLAGS tests/test_vfs.c   $STORAGE -o "$OUT/test_vfs"
 $CC $CFLAGS tests/test_input.c src/core/fa_input.c $STORAGE -o "$OUT/test_input"
 
 echo "== stage 5: platform backend + app loop (RRR-41) =="
+# fa_hiscore now persists Highscore{n}.dat through the VFS, so every bundle
+# that links it also needs $STORAGE (fa_vfs + the platform paths).
 MAPSRC="src/core/fa_w01.c src/core/fa_w02.c src/core/fa_map.c src/core/fa_render.c \
 src/core/fa_entity.c src/core/fa_aom.c src/core/fa_bmp.c src/core/fa_menu.c \
 src/core/fa_hiscore.c src/core/fa_options.c src/core/fa_save.c src/core/fa_rng.c \
 src/game/fa_player.c src/game/fa_charspr.c src/game/fa_collide.c src/game/fa_beh.c \
-src/game/fa_hud.c src/game/fa_death.c src/game/fa_credits.c"
+src/game/fa_hud.c src/game/fa_death.c src/game/fa_credits.c $STORAGE"
 PLATFORM_SRC="src/platform/fa_backend_null.c src/platform/fa_backend_sdl2.c \
 src/platform/fa_platform.c src/app/fa_app.c src/core/fa_surface.c \
-src/core/fa_input.c src/core/fa_vfs.c $AUDIO $MAPSRC $CORE $PATHS"
+src/core/fa_input.c $AUDIO $MAPSRC $CORE"
 # no SDL2 in this build path -> the null backend; FA_HAVE_SDL2 stays undefined.
 # shellcheck disable=SC2086
 $CC $CFLAGS tests/test_platform.c $PLATFORM_SRC $TIMELIB $MATHLIB -o "$OUT/test_platform"
@@ -92,7 +94,8 @@ $CC $CFLAGS tests/test_charspr.c src/game/fa_charspr.c src/core/fa_w01.c \
 
 echo "== stage 8: menu + high-score + options + save (RRR-47) =="
 MENUSRC="src/core/fa_menu.c src/core/fa_hiscore.c src/core/fa_options.c \
-src/core/fa_save.c src/core/fa_bmp.c src/core/fa_w01.c src/core/fa_surface.c"
+src/core/fa_save.c src/core/fa_bmp.c src/core/fa_w01.c src/core/fa_surface.c \
+$STORAGE"
 # shellcheck disable=SC2086
 $CC $CFLAGS tests/test_menu.c $MENUSRC -o "$OUT/test_menu"
 # shellcheck disable=SC2086
