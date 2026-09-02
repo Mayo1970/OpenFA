@@ -678,6 +678,16 @@ int fa_entity_tick(fa_entity_store *s, int cx, int cy, int vw, int vh)
         fa_entity_rec *e = &s->rec[i];
         e->dx = e->dy = 0;
         if (e->active == 0 || e->obj_nr < 0) continue;
+
+        /* RRR-60: a collected respawning pickup (DetailGroup 1/2, ammo/energy)
+         * counts down hidden, then reappears - exe rec[+0x74] = 0x4B0 (1200 t). */
+        if ((e->detail_group == FA_AOM_DG_BONUS ||
+             e->detail_group == FA_AOM_DG_POWERUP) &&
+            e->hidden && e->bs[0] > 0) {
+            if (--e->bs[0] == 0) { e->hidden = 0; e->force_offscreen = 0; }
+            continue;
+        }
+
         /* a shoved block keeps falling off-screen until it lands (or is lost
          * in a pit); everything else obeys the on-screen update gate */
         if (!e->is_block && !e->force_offscreen &&
@@ -851,9 +861,15 @@ int fa_entity_collect(fa_entity_store *s, int px, int py,
         int x0, y0, x1, y1;
         if (ent_frame_box(s, e, &x0, &y0, &x1, &y1) != 0) continue;
         if (pr < x0 || pl > x1 || pb < y0 || pt > y1) continue;
-        e->active = 0;                  /* rec[+6] = 0 (the exe pickup path) */
+        int respawn = cb ? cb(e->obj_nr, e->detail_group, ctx) : 0;
         n++;
-        if (cb) cb(e->obj_nr, e->detail_group, ctx);
+        if (respawn > 0) {              /* exe: hide, count rec[+0x74], reappear */
+            e->hidden = 1;
+            e->force_offscreen = 1;     /* keep it ticking while hidden          */
+            e->bs[0] = respawn;
+        } else {
+            e->active = 0;              /* rec[+6] = 0 (the exe pickup path)     */
+        }
     }
     return n;
 }

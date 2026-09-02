@@ -34,8 +34,9 @@
  *   - An ordinary enemy dies in one accepted projectile hit: +100 at score
  *     0x45ED2C, the launched Freeze, no drop, no in-level respawn. The snowman
  *     is the exception - it freezes ~120 ticks and thaws.
- *   - Bosses (9/10/14/18) bounce a direct body snowball; 10 accepted hits,
- *     +10000, then KO.
+ *   - Bosses (9/10/14/18): 10 accepted hits, +10000, then KO. The gorilla (10)
+ *     is hurt only by a reflected coconut; the yeti (9) and octopus (18) take a
+ *     direct body snowball. The robot (14) is not implemented yet (RRR-61).
  */
 #ifndef FA_BEH_H
 #define FA_BEH_H
@@ -110,6 +111,13 @@ void    fa_beh_set_world(fa_beh *b, int world);
  * per-character line. Call each tick before fa_entity_tick; default 0. */
 void    fa_beh_set_character(fa_beh *b, int character);
 
+/* RRR-60: the current snowball type - 1 = "dirty" (black) balls from
+ * collect_dirtyballs (ObjNr 60, ds:0x4E1044), 0 = normal. Only dirty balls
+ * hurt the World-2 yeti boss (exe 0x41A5E0 returns 2 for a non-0x105 ball,
+ * which the yeti's state-1/3 check accepts as a hit). Call each tick before
+ * fa_entity_tick; default 0. */
+void    fa_beh_set_ammo_dirty(fa_beh *b, int dirty);
+
 /* RRR-52: reseed the enemy RNG stream (the exe's single rand() stream, the
  * source of every random roam / ready / burst-length timer). Call once per
  * level load, after fa_beh_create, for a reproducible run. */
@@ -171,8 +179,18 @@ int fa_beh_boss_hp(const fa_beh *b);          /* -1 if no boss in the level */
  * snowball that strikes an incoming coconut sends it back (vx -> +/-9.0,
  * vy -> -9.0); a returned coconut on the boss body is one accepted hit. Ten
  * hits -> +10000 -> KO. `fa_beh_boss_defeated` is 1 once that KO has fired.
- * The yeti (9) / robot (14) bosses are not implemented yet (RRR-60 / RRR-61);
- * only the octopus (18) also takes a direct snowball.
+ *
+ * RRR-60: the World-2 yeti boss (ObjNr 9, Welt2E, 0x40E350). Stationary; holds
+ * a frozen pose and periodically KICKS or HOPS or talks. Only a DIRTY ("black")
+ * snowball (collect_dirtyballs, ObjNr 60) hurts it, and only while it is idle
+ * or kicking. Same 10 hits -> +10000 -> KO and the same 7th-piece (ObjNr 59)
+ * -> CLASSIFICA chain as the gorilla. Call fa_beh_set_ammo_dirty each tick.
+ *   - KICK sends a floor ice block (ObjNr 265) sliding left at the kid.
+ *   - HOP (and every hit-recoil jump) drops a pattern of ceiling icicles
+ *     (ObjNr 79).
+ *   - the ice platform under it (ObjNr 80) stops animating on the KO.
+ * fa_beh binds behaviours to ObjNr 265 / 79 / 80 automatically. The robot (14)
+ * boss is still a statue (RRR-61); the octopus (18) takes any direct snowball.
  */
 int fa_beh_boss_defeated(const fa_beh *b);
 

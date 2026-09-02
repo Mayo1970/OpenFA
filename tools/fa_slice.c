@@ -254,8 +254,11 @@ static void beh_score(int add, void *ctx)
  *   59       collect_i7                              0x40f770  score += 10000
  *   60       collect_dirtyballs                      0x40fa00  ammo = 10, "dirty"
  * (the "+N" POINTS.W01 popup the exe also spawns is cosmetic - not ported.)
+ * The energy + both ammo pickups (51/52/60) respawn 1200 ticks (20 s) after
+ * they are taken (exe rec[+0x74] = 0x4B0); the score / recipe ones are gone
+ * for good. The callback returns that respawn delay (0 = permanent).
  */
-static void beh_pickup(int obj_nr, int detail_group, void *ctx)
+static int beh_pickup(int obj_nr, int detail_group, void *ctx)
 {
     slice *s = (slice *)ctx;
     (void)detail_group;
@@ -264,16 +267,17 @@ static void beh_pickup(int obj_nr, int detail_group, void *ctx)
         case 51:
             s->health += 40;
             if (s->health > 100) s->health = 100;
-            break;
-        case 52: s->ammo = 10; s->dirty_shot = 0;     break;
+            return 1200;
+        case 52: s->ammo = 10; s->dirty_shot = 0;     return 1200;
         case 53: case 54: case 55: case 56: case 57: case 58:
             s->score += 1000;
             s->items[obj_nr - 53] = 1;
             break;
         case 59: s->score += 10000;                   break;
-        case 60: s->ammo = 10; s->dirty_shot = 1;     break;
+        case 60: s->ammo = 10; s->dirty_shot = 1;     return 1200;
         default: break;
     }
+    return 0;
 }
 static void beh_sfx(int ev, int obj, void *ctx)
 {
@@ -857,6 +861,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
          * tick (fixes the raft fall-pose and lets blocks stay solid). */
         if (s->beh) {
             fa_beh_set_character(s->beh, s->pl.character & 1);
+            fa_beh_set_ammo_dirty(s->beh, s->dirty_shot);
             fa_beh_begin_frame(s->beh, fa_player_px(&s->pl), fa_player_py(&s->pl),
                                40, (s->pl.state == FA_PST_CROUCH) ? 100 : 190,
                                (s->pl.facing == FA_FACE_RIGHT) ? 1 : -1,
@@ -1119,15 +1124,20 @@ static void slice_plane_hook(void *ud, const fa_surface *dst,
         fa_rect body = { px - 8, py - 40, 16, 40 };
         fa_fill(dst, &body, NULL, fa_rgb565(240, 210, 60));
     }
-    /* thrown snowball = PINGUIN.W01 frame 261 (Schneeball, 22x22) */
+    /* thrown snowball = PINGUIN.W01 frame 261 (0x105, Schneeball); the "dirty"
+     * black ball after collect_dirtyballs is frame 232 (0xE8) - the exe's
+     * snowball-slot type doubles as the sprite frame (spawn 0x41A268). */
     const fa_w01 *proj_w = s->have_kids ? &s->kid_sheet[0].w01 : NULL;
+    int proj_f = s->dirty_shot ? 232 : 261;
     for (int i = 0; i < FA_MAX_SNOWBALLS; i++) {
         if (!s->pl.snow[i].alive) continue;
         int sx = (int)(s->pl.snow[i].x >> 16) - cam->x;
         int sy = (int)(s->pl.snow[i].y >> 16) - cam->y;
-        if (!blit_w01_centered(dst, proj_w, 261, sx, sy)) {
+        if (!blit_w01_centered(dst, proj_w, proj_f, sx, sy)) {
             fa_rect b = { sx - 3, sy - 3, 6, 6 };
-            fa_fill(dst, &b, NULL, fa_rgb565(255, 255, 255));
+            fa_fill(dst, &b, NULL,
+                    s->dirty_shot ? fa_rgb565(40, 40, 48)
+                                  : fa_rgb565(255, 255, 255));
         }
     }
 }

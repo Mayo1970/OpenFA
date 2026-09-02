@@ -265,14 +265,17 @@ int fa_entity_ride(const fa_entity_store *s, int px, int feet_y, int half_w,
                    int *lift_top, int *carry_dx, int *carry_dy);
 
 /* Pickup callback: the collected object's ObjNr and DetailGroup (1 BONUS /
- * 2 POWERUP). */
-typedef void (*fa_entity_pickup_cb)(int obj_nr, int detail_group, void *ctx);
+ * 2 POWERUP). Return 0 to remove the pickup for good, or a positive tick count
+ * to hide it and have it reappear after that many ticks (the exe respawns the
+ * ammo / energy pickups after rec[+0x74] = 0x4B0 = 1200 ticks = 20 s). */
+typedef int (*fa_entity_pickup_cb)(int obj_nr, int detail_group, void *ctx);
 
 /*
  * Collect every active DetailGroup 1/2 object whose sprite AABB overlaps the
- * player box (centre px,py; half extents half_w/half_h). Each match is
- * deactivated (active = 0, matching the exe's rec[+6] = 0 pickup path) and
- * reported through `cb`. Returns the number collected, or -1 on a bad arg.
+ * player box (centre px,py; half extents half_w/half_h). Each match is reported
+ * through `cb`; a 0 return removes it (active = 0, the exe's rec[+6] = 0 path),
+ * a positive return hides it for that many ticks then it reappears. Returns the
+ * number collected, or -1 on a bad arg.
  */
 int fa_entity_collect(fa_entity_store *s, int px, int py,
                       int half_w, int half_h,
