@@ -284,6 +284,9 @@ static void beh_sfx(int ev, int obj, void *ctx)
     slice *s = (slice *)ctx;
     if (!s->audio) return;
     switch (ev) {
+        case FA_BEH_SFX_BOSS_KO_ANIM:                   /* RRR-61 robot: RBKO fr56 */
+            if (obj == 14) fa_audio_event(s->audio, FA_SND_W3_BOSS_KO);
+            break;
         case FA_BEH_SFX_BOSS_KO:
             if (obj == 14) { fa_audio_event(s->audio, FA_SND_W3_BOSS_DEFEAT); break; }
             /* fall through */
@@ -299,10 +302,14 @@ static void beh_sfx(int ev, int obj, void *ctx)
         case FA_BEH_SFX_ENEMY_SHOT:            /* the throw - egg robot differs */
             fa_audio_event(s->audio,
                 obj == 14 ? FA_SND_W3_BOSS_SHOT :       /* RRR-61 robot bolt   */
+                obj == 18 ? FA_SND_W4_BOSS_SHOT :       /* RRR-62 milk particle */
                 obj == 12 ? FA_SND_ENEMY_THROW_EGG : FA_SND_ENEMY_THROW);
             break;
-        case FA_BEH_SFX_BOSS_CHARGE:                    /* RRR-61 robot wind-up */
-            fa_audio_event(s->audio, FA_SND_W3_BOSS_CHARGE); break;
+        case FA_BEH_SFX_BOSS_CHARGE:                    /* boss wind-up cue     */
+            fa_audio_event(s->audio,
+                obj == 18 ? FA_SND_W4_BOSS_DRINK        /* RRR-62 octopus slurp */
+                          : FA_SND_W3_BOSS_CHARGE);     /* RRR-61 robot wind-up */
+            break;
         case FA_BEH_SFX_BOSS_HIT:
             /* RRR-61 World 3: button push / pipe drop / the robot taking a
              * hit each have their own w3sf cue (owner playtest). */
@@ -743,10 +750,14 @@ static void begin_after_death(slice *s, int won)
     s->boss_win_timer = 0;
 
     s->scores = fa_hiscore_load(s->gdata);
-    if (s->scores)
+    if (s->scores) {
         fa_hiscore_set_world(s->scores, s->world - 1);   /* 0..3 */
-    else
+        /* the run was in a world - show that world's boss portrait, as the
+         * exe does on scene 15 (Gegner.w01 frame 0x4DABD4). */
+        fa_hiscore_set_boss_pic(s->scores, s->world - 1);
+    } else {
         s->menu = fa_menu_load(s->gdata);                /* no assets: menu */
+    }
 
     fa_death_init(&s->death);
     printf("%s (score %d) -> CLASSIFICA (Welt%d), then the menu\n",
@@ -1249,6 +1260,7 @@ static void s_render(double alpha, uint16_t *fb, int w, int h, size_t pitch,
                     case 15: pf = 53; break;
                     case 10: pf = 87; break;
                     case 14: pf = 188; break;   /* robot boss bolt (RRR-61) */
+                    case 18: pf = 50; break;    /* octopus milk particle (RRR-62) */
                     default: pf = -1; break;
                 }
                 const fa_w01 *pw = (pf >= 0 && s->ents)

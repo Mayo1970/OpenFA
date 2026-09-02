@@ -232,6 +232,9 @@ static const snd_def SND_TBL[FA_SND__COUNT] = {
     [FA_SND_W3_BOSS_SHOT]   = { "SDat/w3sf03.wav",             6, 0 },
     [FA_SND_W3_BOSS_CHARGE] = { "SDat/W3SF05 2.Alternative.wav",9, 0 },
     [FA_SND_W3_BOSS_DEFEAT] = { "SDat/w3sf04a.wav",            9, 0 },
+    [FA_SND_W3_BOSS_KO]     = { "SDat/w3sf04b.wav",           10, 0 },
+    [FA_SND_W4_BOSS_DRINK]  = { "SDat/w4sf01.wav",             9, 0 },
+    [FA_SND_W4_BOSS_SHOT]   = { "SDat/w4sf02.wav",             9, 0 },
 };
 
 /* ================================================================== *

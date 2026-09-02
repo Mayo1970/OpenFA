@@ -66,7 +66,9 @@ enum {
     FA_BEH_SFX_BOSS_KO,        /* a boss was defeated                       */
     FA_BEH_SFX_BROESEL_BREAK,  /* a crumbling platform broke (0x422B60 id 6,
                                 * knusper.wav, slot 6)                       */
-    FA_BEH_SFX_BOSS_CHARGE     /* RRR-61: the robot boss winds up to fire   */
+    FA_BEH_SFX_BOSS_CHARGE,    /* RRR-61: the robot boss winds up to fire   */
+    FA_BEH_SFX_BOSS_KO_ANIM    /* RRR-61: a beat inside the boss KO anim
+                                * (robot: w3sf04b ch10 at RBKO frame 56)    */
 };
 
 typedef struct fa_beh_hooks {

@@ -45,6 +45,14 @@ void        fa_hiscore_free(fa_hiscore *h);
 void fa_hiscore_set_world(fa_hiscore *h, int world0);
 int  fa_hiscore_world(const fa_hiscore *h);
 
+/* Show the beaten world's boss portrait on the right of the screen. This is
+ * the exe's GData\Animation\Interface\Gegner.w01 (four frames, one per world),
+ * drawn at its own table-A origin by handlers 0x4037A0 (state 0x10) and
+ * 0x403C58 (state 0x12) with the frame index = the last-played world 0x4DABD4.
+ * world0 0..3 picks the frame; -1 (the default) draws no portrait - the case
+ * of the screen opened cold from the menu's CLASSIFICA button. */
+void fa_hiscore_set_boss_pic(fa_hiscore *h, int world0);
+
 /* Draw the whole screen into `dst` (expected 800x600 RGB565). 0/-1. */
 int  fa_hiscore_render(const fa_hiscore *h, const struct fa_surface *dst);
 

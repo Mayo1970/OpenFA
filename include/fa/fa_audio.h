@@ -109,6 +109,12 @@ typedef enum fa_snd_event {
     FA_SND_W3_BOSS_SHOT,   /* w3sf03.wav lane 6 - the robot fires a bolt     */
     FA_SND_W3_BOSS_CHARGE, /* "W3SF05 2.Alternative.wav" lane 9 - wind-up    */
     FA_SND_W3_BOSS_DEFEAT, /* w3sf04a.wav lane 9 - the robot is defeated     */
+    FA_SND_W3_BOSS_KO,     /* w3sf04b.wav lane 10 - RBKO frame 56 (exe ch10) */
+
+    /* RRR-62: the World-4 (VALLE) octopus/KRAKE boss cues (preload
+     * 0x4123C1.., 0x40CD70 handler). Both on lane 9, one-shot. */
+    FA_SND_W4_BOSS_DRINK,  /* w4sf01.wav lane 9 - the octopus drinks milk (vulnerable) */
+    FA_SND_W4_BOSS_SHOT,   /* w4sf02.wav lane 9 - the octopus fires a milk particle    */
 
     FA_SND__COUNT
 } fa_snd_event;

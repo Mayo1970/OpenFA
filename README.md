@@ -8,7 +8,7 @@ You need to own the game for OpenFA to play it.
 - [x] Physics match
 - [x] Levels load
 - [x] Pickups work as intended
-- [ ] Boss fights
+- [x] Boss fights
 - [ ] Scoreboard
 - [ ] Polish
 

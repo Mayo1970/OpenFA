@@ -42,6 +42,7 @@
 #define FX_0_2  13107     /* 0.2  (block friction, 0x4522A0)  */
 #define FX_0_3  19661     /* 0.3  */
 #define FX_0_03 1966      /* 0.03 (coconut flat-throw gravity, 0x40C883)   */
+#define FX_0_07 4588      /* 0.07 (octopus flat milk-particle grav, 0x40D0BF) */
 #define FX_0_5  32768     /* 0.5  (flat-coconut reflect vy, 0x40C331)      */
 #define FX_9_0  589824    /* 9.0  (reflected coconut speed, 0x40C318)      */
 #define FX_0_4  26214     /* 0.4  (RRR-61 pipe-drop gravity, 0x452294)  */
@@ -116,7 +117,7 @@ static const edesc DESC[] = {
 {15,K_THROW,  1,3,1,  3,  10, 10, 68, 205, 107,600, 19,419, 47,-72, 76,245, 11, -3,  0},/*baer*/
 {16,K_DIVE,   0,1,1,  2,  10, 30, 68,  70,  44,180,300,500,  0,  0,  0,  0,   0,  0,  0},/*biene*/
 {17,K_STAND,  0,3,1,  3,  40,  0, 70,  90,   0,  0,  0,  0,  0,  0,  0,  0,   0,  0,  0},/*kl_krake*/
-{18,K_BOSS,   0,1,0,  0,  30, 10,170, 175,   0,  0,  0,  0,  0,  0,  0,  0,   0,  1,  9},/*krake boss (tvy=1: takes snowballs)*/
+{18,K_BOSS,   0,3,0,  0,  30, 10,170, 175,   0,  0,  0,  0,  0,  0,  0,  0,   0,  1,  9},/*krake/octopus boss (andelay 3: exe 0x40CDA1; tvy=1 marks the direct-hit path)*/
 };
 #define DESC_COUNT ((int)(sizeof DESC / sizeof DESC[0]))
 
@@ -219,6 +220,24 @@ static const char *RB_TAUNT[5] = { "SDat/voices/ita/rb0011.wav",
                                    "SDat/voices/ita/rb0001.wav",
                                    "SDat/voices/ita/rb0013.wav" };
 
+/* RRR-62: the World-4 octopus (KRAKE) boss voice lines (0x40CD70 -> strings at
+ * 0x455F6C / 0x455F48 / 0x455F24 / 0x455EB8 / 0x455EDC / 0x455F00 / 0x455E70 /
+ * 0x455E94 / 0x455E4C). ob0001 intro; ob0004 a snowball registered; ob0002/3
+ * the on-hit taunts (state 101); ob0007 the calm shoot-end line; ob0008/9/13
+ * the shoot-end lines when the kid shot back; ob0006 defeat. */
+#define OB_INTRO  "SDat/voices/ita/ob0001.wav"
+#define OB_HIT    "SDat/voices/ita/ob0004.wav"
+#define OB_DEFEAT "SDat/voices/ita/ob0006.wav"
+/* shoot-end when the kid did NOT shoot back: rand%2 over ob0007 / ob0013
+ * (exe 0x40D122..0x40D166). */
+static const char *OB_CALM[2] = { "SDat/voices/ita/ob0007.wav",
+                                  "SDat/voices/ita/ob0013.wav" };
+static const char *OB_HITTAUNT[2] = { "SDat/voices/ita/ob0002.wav",
+                                      "SDat/voices/ita/ob0003.wav" };
+static const char *OB_SHOTAT[3]   = { "SDat/voices/ita/ob0008.wav",
+                                      "SDat/voices/ita/ob0009.wav",
+                                      "SDat/voices/ita/ob0013.wav" };
+
 /* RRR-60: when the yeti lands from a hop it sets ds:0x4E0B20 to one of these
  * 6-bit patterns (exe table 0x4560B0, rand()%9); every ceiling icicle (ObjNr
  * 79) whose rec[+0x2A] bit is set then falls. */
@@ -236,26 +255,11 @@ static int overlap(int ax0,int ay0,int ax1,int ay1,int bx0,int by0,int bx1,int b
     return !(ax1 < bx0 || ax0 > bx1 || ay1 < by0 || ay0 > by1);
 }
 
-/* RRR-61: the robot boss aim. Owner: the bolt is angled to pass through the
- * Y of the wall button (ObjNr 83) nearest the kid - there are 3, so 3 angles.
- * rb_lane = that button's rec[0x2A] index (0 bottom .. 2 top); rb_button_cy =
- * its box centre Y (or a fallback if the arena has no buttons / no def). */
-static int rb_button_cy(const fa_beh *b, int idx, int fallback)
-{
-    int c = fa_entity_count(b->store);
-    for (int i = 0; i < c; i++) {
-        const fa_entity_rec *e = fa_entity_at(b->store, i);
-        if (!e || e->obj_nr != 83) continue;
-        if (((unsigned char)e->raw[0x2a] & 3) != idx) continue;
-        int x0, y0, x1, y1;
-        if (fa_entity_frame_box((fa_entity_store *)b->store, i,
-                                &x0, &y0, &x1, &y1) == 0)
-            return (y0 + y1) / 2;
-        return e->y;
-    }
-    return fallback;
-}
-
+/* RRR-61: the robot boss aim lane. The exe (0x40D7B7) buckets the player's
+ * SCREEN x at 0x120 / 0x240, but the owner prefers our own read: the lane is
+ * the wall button (ObjNr 83) whose frame-box centre Y is nearest the kid's
+ * feet. Buttons are stacked (idx 0 low .. 2 high), so the bolt - through the
+ * fixed exe vy table {+10, 0, -8} - tracks the button the kid stands at. */
 static int rb_lane(const fa_beh *b)
 {
     int best = 1, bestd = -1;
@@ -937,6 +941,13 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
                 e->bs[BS_RNG] = 0;           /* intro sub-phase 0            */
                 pd_range(e, 172, 176, 0);    /* RBTL02 lead-in 172..176       */
                 if (b->h.voice) b->h.voice(RB_INTRO, b->h.user);
+            } else if (e->obj_nr == 18) {    /* octopus: intro talk first     */
+                e->bs[BS_LS] = 320;
+                e->flip_x = 0;
+                e->anim_extra_delay = 3;     /* exe 0x40CDA1: rec[0x10] = 3   */
+                e->anim_timer = 3;
+                pd_range(e, 42, 49, 0);      /* OBTL02 "Talk" 42..49          */
+                if (b->h.voice) b->h.voice(OB_INTRO, b->h.user);
             }
         }
         /* the exe body never terrain-probes; the RRR-50 one-time spawn snap
@@ -952,9 +963,10 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
             if (drop < 224) { e->y += drop; e->bs[BS_FY] = (int32_t)e->y << 16; }
         }
         if (!(d->kind == K_BOSS &&
-              (e->obj_nr == 10 || e->obj_nr == 9 || e->obj_nr == 14)))
-            set_state(b, e, 0, 1);          /* Walk, forward (not the gorilla /
-                                            * yeti / robot - they hold a pose) */
+              (e->obj_nr == 10 || e->obj_nr == 9 || e->obj_nr == 14 ||
+               e->obj_nr == 18)))
+            set_state(b, e, 0, 1);          /* Walk, forward (not the bosses -
+                                            * they hold their intro pose)     */
         return 0;
     }
 
@@ -1042,25 +1054,134 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
         int x0,y0,x1,y1;
         enemy_box(b, idx, e, d, &x0,&y0,&x1,&y1);
 
-        /* --- octopus (Welt4E, ObjNr 18): the one boss a direct snowball
-         * hurts (0x40CD70 tvy path). 10 hits -> +10000 -> KO. --- */
-        if (d->tvy == 1) {
-            if (snow_hit(b, x0,y0,x1,y1)) {
-                if (--e->bs[BS_N] < 0) {
-                    set_state(b, e, 18, 0);
-                    e->bs[BS_LS] = 100; e->bs[BS_KT] = 120;
-                    e->collision_enabled = 0;
-                    if (b->h.score) b->h.score(10000, b->h.user);
-                    if (b->h.sfx)   b->h.sfx(FA_BEH_SFX_BOSS_KO, e->obj_nr, b->h.user);
-                    b->boss_hp = -1;
-                    b->boss_defeated = 1;
-                } else {
-                    if (b->h.sfx) b->h.sfx(FA_BEH_SFX_BOSS_HIT, e->obj_nr, b->h.user);
-                    b->boss_hp = e->bs[BS_N];
-                }
+        /* --- octopus / KRAKE (Welt4E, ObjNr 18): stationary; talks, then
+         * either drinks milk (OBFL, VULNERABLE) or shoots milk particles
+         * (OBSH, invincible). 0x41A5E0 flag 1 in the drink state only
+         * (0x40CE39) -> a direct snowball there is the ONLY damage; flag 2
+         * (bounce) everywhere else. Exe 0x40CD70, hand disasm + Codex.
+         * KRAKE.W01 / "Animation von Krake.txt": OBFL 0..10 "Milch Tanken"
+         * (flipflop), OBGE 11..19 punch (unused), OBKO 20..26, OBPA 27..35
+         * "Hit", OBSH 36..41 "Shoot", OBTL 42..49 "Talk" (loop 46..49),
+         * frame 50 = the milk-particle sprite. States (ours -> exe):
+         *   320 talk    <- 0/50/51 : OBTL while a voice plays -> decide
+         *   360 refuel  <- 1       : OBFL ping-pong; slurp (w4sf01) at fr 7;
+         *                            VULNERABLE; done -> shoot
+         *   350 shoot   <- 2       : OBSH loop; one milk particle / loop at
+         *                            fr 41 (w4sf02); ~50..79 t burst -> talk
+         *   300 hit     <- 101     : OBPA once -> --HP; <0 -> defeat else talk
+         *   310 dead    <- 110     : OBKO, held --- */
+        if (e->obj_nr == 18) {
+            int bx0 = e->x + 30,  bx1 = e->x + 200;
+            int by0 = e->y + 10,  by1 = e->y + 185;
+
+            /* only the drink state takes a hit (exe 0x40CE25 flag 1) */
+            if (e->bs[BS_LS] == 360 && snow_hit(b, bx0,by0,bx1,by1)) {
+                e->bs[BS_LS] = 300;
+                e->bs[BS_AF] = 0;
+                e->anim_extra_delay = 3;
+                pd_range(e, 27, 35, 0);            /* OBPA "Hit"             */
+                if (b->h.voice) b->h.voice(OB_HIT, b->h.user);
+                touch_player(b, bx0,by0,bx1,by1);
+                return 0;
             }
-            touch_player(b, x0,y0,x1,y1);
-            return 0;
+
+            switch (e->bs[BS_LS]) {
+            case 310:                              /* defeated: hold OBKO    */
+                e->frame = e->anim_last;
+                return 0;
+
+            case 320:                              /* OBTL "Talk" 42..49     */
+                if (e->frame >= 46) e->anim_first = 46;   /* loop 46..49     */
+                if ((!b->h.voice_busy || !b->h.voice_busy(b->h.user)) &&
+                    (wrapped || e->frame >= 49)) {
+                    if (brand(b, 100) < 50) {            /* -> drink / refuel */
+                        e->bs[BS_LS] = 360;
+                        e->bs[BS_AF] = 0;
+                        e->anim_extra_delay = 3;
+                        pd_range(e, 0, 10, 0);            /* OBFL             */
+                    } else {                            /* -> shoot          */
+                        e->bs[BS_LS]  = 350;
+                        e->bs[BS_RT]  = 50 + brand(b, 30);   /* burst ticks  */
+                        e->bs[BS_KT]  = brand(b, 2);         /* particle arc */
+                        e->bs[BS_AF]  = 0;
+                        e->bs[BS_RNG] = 0;                   /* shot-at flag */
+                        pd_range(e, 36, 41, 0);             /* OBSH          */
+                    }
+                }
+                touch_player(b, bx0,by0,bx1,by1);
+                return 0;
+
+            case 360:                              /* OBFL ping-pong: drink  */
+                if (e->frame >= 10)      e->anim_mode = 2;  /* -> reverse    */
+                else if (e->frame <= 0)  e->anim_mode = 0;  /* -> forward    */
+                if (e->anim_mode == 0 && e->frame >= 7 && !e->bs[BS_AF]) {
+                    e->bs[BS_AF] = 1;                       /* slurp, once   */
+                    if (b->h.sfx)
+                        b->h.sfx(FA_BEH_SFX_BOSS_CHARGE, 18, b->h.user);
+                }
+                if (e->bs[BS_AF] && e->anim_mode == 0 && e->frame <= 0) {
+                    e->bs[BS_LS]  = 350;                    /* -> shoot      */
+                    e->bs[BS_RT]  = 50 + brand(b, 30);
+                    e->bs[BS_KT]  = brand(b, 2);
+                    e->bs[BS_AF]  = 0;
+                    e->bs[BS_RNG] = 0;
+                    pd_range(e, 36, 41, 0);
+                }
+                touch_player(b, bx0,by0,bx1,by1);
+                return 0;
+
+            case 350: {                            /* OBSH: raise, then fire  */
+                if (snow_hit(b, bx0,by0,bx1,by1))
+                    e->bs[BS_RNG] = 1;              /* bounced, but noted     */
+                /* exe 0x40D046: on OBSH frame 41 it pins the frame
+                 * (rec[0x12]=1) and toggles rec[0x78] every tick - so one
+                 * milk particle every 2 ticks for the whole rec[0x74] burst,
+                 * not one per anim loop. Codex-verified 0x40D04D..0x40D0F6. */
+                if (e->frame >= 41) {
+                    e->anim_first = 41;            /* pin (anim_last == 41)   */
+                    if (!e->bs[BS_AF]) {
+                        int lob = e->bs[BS_KT] == 0;
+                        /* spawn (bossX-40, bossY+60), vx -10 always;
+                         * lob = vy -6 grav 0.2, flat = vy 0 grav 0.07. */
+                        spawn_proj(b, 18, e->x - 40, e->y + 60, -10,
+                                   lob ? -6 : 0, lob ? FX_0_2 : FX_0_07, 240);
+                        e->bs[BS_AF] = 1;
+                    } else {
+                        e->bs[BS_AF] = 0;
+                    }
+                }
+                if (--e->bs[BS_RT] <= 0) {          /* burst done -> taunt    */
+                    if (b->h.voice)
+                        b->h.voice(e->bs[BS_RNG] ? OB_SHOTAT[brand(b, 3)]
+                                                 : OB_CALM[brand(b, 2)],
+                                   b->h.user);
+                    e->bs[BS_LS] = 320;
+                    pd_range(e, 42, 49, 0);
+                }
+                touch_player(b, bx0,by0,bx1,by1);
+                return 0;
+            }
+
+            default:                               /* 300: took a hit (OBPA) */
+                if (wrapped) {
+                    if (--b->boss_hp < 0) {
+                        b->boss_hp = -1;
+                        b->boss_defeated = 1;
+                        e->bs[BS_LS] = 310;
+                        e->collision_enabled = 0;
+                        pd_range(e, 20, 26, 0);    /* OBKO                   */
+                        if (b->h.score) b->h.score(10000, b->h.user);
+                        if (b->h.voice) b->h.voice(OB_DEFEAT, b->h.user);
+                    } else {
+                        if (b->h.voice)
+                            b->h.voice(OB_HITTAUNT[brand(b, 2)], b->h.user);
+                        e->bs[BS_LS] = 320;
+                        pd_range(e, 42, 49, 0);
+                    }
+                }
+                touch_player(b, bx0,by0,bx1,by1);
+                return 0;
+            }
         }
 
         /* --- gorilla (Welt1E, ObjNr 10): stationary; lobs coconuts; hurt
@@ -1291,124 +1412,150 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
             }
         }
 
-        /* --- robot (Welt3E, ObjNr 14): stationary; fires 3 aimed bolts
-         * (ROBOTER.W01 frame 188) whose lane depends on the player's position.
+        /* --- robot (Welt3E, ObjNr 14): stationary; fires bolts (ROBOTER.W01
+         * frame 188) in one of 3 lanes (rb_lane: the wall button nearest the
+         * kid; the exe buckets screen-x thirds, owner prefers this).
          * NEVER hurt by a snowball - every exe state calls 0x41A5E0(box,
          * flag 2) = bounce. Damage: the kid pushes the 3 buttons (ObjNr 83)
          * on the left of the arena; all 3 down -> the pipe (ObjNr 85) drops
          * onto the robot -> 1 hit, then the buttons reset (see beh_button /
-         * beh_pipe; the hit itself is raised there via boss state 300).
-         * Exe 0x40D6B0, hand disasm. ROBOTER.W01: RBAD01 0..18, RBAD02 19..37,
-         * RBGE02 38..48, RBKO02 49..71, RBPS02 72..87, RBSA02 88..104 /
-         * RBSB02 105..121 / RBSC02 122..138 (lane 0/1/2 shoot), RBTL01
-         * 156..171 / RBTL02 172..187 (talk). States (ours -> exe):
-         *   320 intro talk <- 0/50/51 ; 340 idle <- 41/60/61 ;
-         *   350 shoot <- 10/11 ; 360 recover + taunt roll <- 12/40 ;
-         *   300 hit <- 100/101 ; 310 defeated <- 110. --- */
+         * beh_pipe; the hit is raised there via boss state 300).
+         * Exe 0x40D6B0, hand disasm + PE tables (jump 0x40E280, state byte
+         * table 0x40E2B8, lane sub-table 0x40E328). ROBOTER.W01: RBAD01 0..18,
+         * RBAD02 19..37, RBGE02 38..48, RBKO02 49..71, RBSA02 88..104 /
+         * RBSB02 105..121 / RBSC02 122..138 (lane 0/1/2 shoot),
+         * RBTL02 172..187 (talk). States (ours -> exe):
+         *   320 talk <- 50/51 ; 325 st41 <- 41 ; 330 breathe <- 60/61 ;
+         *   350 shoot <- 10/11 ; 340 taunt roll <- 12/40 ;
+         *   300 hit <- 100/101 ; 310 defeated <- 110.
+         * Every path to the shoot burst passes through 325 (rb0010) + one
+         * Breathe B - the exe's state 41. Loop: talk -> 325 -> breathe ->
+         * shoot -> taunt roll -> { talk | breathe -> 325 -> breathe } -> ...
+         * bs[BS_KT]: in 325/330 it flags "the breathe after this leads to
+         * shoot"; in 350 it is the lane. bs[BS_RNG] = the sub-phase in
+         * 320 (0..2 talk) and 350 (0 raise / 1 fire / 2 lower). --- */
         if (e->obj_nr == 14) {
             int bx0 = e->x + 20,  bx1 = e->x + 130;
             int by0 = e->y + 20,  by1 = e->y + 282;
 
-            /* per the owner's frame sheet (artifact 0a2b0192):
-             *  intro RBTL02 : 172..176 once -> loop 177..182 while talking ->
-             *                 183..187 once
-             *  attack       : RBAD02 19..37 (Breathe B) -> per lane f0 =
-             *                 88 + lane*17: f0..f0+4 raise -> loop f0+5..f0+12
-             *                 while shooting -> f0+13..f0+16 lower
-             * bs[BS_RNG] = the sub-phase (0/1/2) within intro and shoot. */
             switch (e->bs[BS_LS]) {
-            case 310:                             /* defeated: hold KO       */
-                e->frame = e->anim_last;
+            case 310:                             /* defeated: RBKO 49..71 once */
+                if (e->frame >= 56 && !e->bs[BS_AF]) {
+                    e->bs[BS_AF] = 1;             /* w3sf04b ch10 (exe 0x40E237) */
+                    if (b->h.sfx)
+                        b->h.sfx(FA_BEH_SFX_BOSS_KO_ANIM, 14, b->h.user);
+                }
+                if (wrapped) {                    /* played through -> hold last */
+                    e->anim_first = e->anim_last;
+                    e->frame = e->anim_last;
+                }
                 return 0;
 
-            case 320:                             /* intro talk RBTL02       */
+            case 320:                             /* talk RBTL02 (exe 50/51)   */
                 touch_player(b, bx0,by0,bx1,by1);
-                if (e->bs[BS_RNG] == 0) {          /* 172..177 lead-in        */
-                    if (wrapped || e->frame >= 177) {
+                if (e->bs[BS_RNG] == 0) {          /* 172..176 lead-in          */
+                    if (wrapped || e->frame >= 176) {
                         e->bs[BS_RNG] = 1;
                         pd_range(e, 178, 181, 0);
                     }
-                } else if (e->bs[BS_RNG] == 1) {   /* 178..181 loop / talking */
+                } else if (e->bs[BS_RNG] == 1) {   /* 178..181 loop while talking */
                     if (!b->h.voice_busy || !b->h.voice_busy(b->h.user)) {
                         e->bs[BS_RNG] = 2;
                         pd_range(e, 182, 187, 0);
                     }
-                } else if (wrapped || e->frame >= 187) {   /* 182..187 finish */
-                    e->bs[BS_LS]  = 340;
-                    e->bs[BS_RT]  = 30 + brand(b, 30);
-                    pd_range(e, 0, 18, 0);        /* RBAD01 idle              */
+                } else if (wrapped || e->frame >= 187) {
+                    e->bs[BS_LS] = 325;          /* -> exe state 41            */
                 }
                 return 0;
 
-            case 355:                              /* Breathe B 19..37 = reload */
-                /* owner: the reload sound plays DURING Breathe B, the clip
-                 * LOOPS, and the whole phase runs ~1 s longer than the clip.
-                 * bs[BS_RT] = the reload timer. */
+            case 325:                             /* exe 41: rb0010 -> breathe  */
+                if (b->h.voice) b->h.voice(RB_STATE41, b->h.user);
+                e->bs[BS_KT] = 1;                 /* this breathe -> shoot      */
+                e->bs[BS_LS] = 330;
+                e->anim_extra_delay = 3;
+                pd_range(e, 19, 37, 0);           /* RBAD02 Breathe B          */
+                if (b->h.sfx) b->h.sfx(FA_BEH_SFX_BOSS_CHARGE, 14, b->h.user);
                 touch_player(b, bx0,by0,bx1,by1);
-                if (--e->bs[BS_RT] <= 0) {
-                    e->bs[BS_LS]  = 350;
-                    e->bs[BS_RNG] = 0;               /* shoot phase 0 = raise */
-                    e->bs[BS_N]   = 7 + brand(b, 10);     /* 7..16 shots      */
-                    e->bs[BS_AF]  = 0;
-                    e->bs[BS_KT]  = rb_lane(b);
-                    int f0 = 88 + e->bs[BS_KT] * 17;
-                    pd_range(e, f0, f0 + 4, 0);      /* raise                 */
+                return 0;
+
+            case 330:                             /* Breathe B (exe 60/61)     */
+                touch_player(b, bx0,by0,bx1,by1);
+                if ((!b->h.voice_busy || !b->h.voice_busy(b->h.user)) &&
+                    (wrapped || e->frame >= 37)) {
+                    if (e->bs[BS_KT]) {           /* -> shoot burst            */
+                        e->bs[BS_LS]  = 350;
+                        e->bs[BS_RNG] = 0;
+                        e->bs[BS_N]   = 7 + brand(b, 10);  /* 7..16 (kept)     */
+                        e->bs[BS_AF]  = 0;
+                        e->bs[BS_KT]  = rb_lane(b);
+                        int f0 = 88 + e->bs[BS_KT] * 17;
+                        pd_range(e, f0, f0 + 4, 0);        /* raise            */
+                    } else {                     /* exe: 60/61 -> 41 -> 60/61  */
+                        e->bs[BS_LS] = 325;
+                    }
                 }
                 return 0;
 
-            case 350: {                            /* shoot: aim AT a button   */
-                /* exe 0x40D824: always fires LEFT (vx -20). Owner: the bolt
-                 * passes through the nearest wall button's Y - vy is solved
-                 * from spawn -> that button. Bolt = ROBOTER.W01 frame 188. */
-                static const int DX[3] = { -12, -24, -12 };
-                static const int DY[3] = { 157,  98,  58 };
-                static const int FB[3] = { 616, 393, 140 };  /* button Y fallback */
+            case 350: {                            /* shoot (exe 10/11)        */
+                /* exe 0x40D824: always fires LEFT (vx -20), no gravity. The
+                 * lane follows the player every tick; each lane has a fixed
+                 * spawn offset + vy (exe sub-table 0x40E328). Bolt = frame 188.*/
+                static const int RB_DX[3] = { -12, -24, -12 };
+                static const int RB_DY[3] = { 157,  98,  58 };
+                static const int RB_VY[3] = {  10,   0,  -8 };
                 int lane = e->bs[BS_KT];
                 int f0   = 88 + lane * 17;
 
                 if (e->bs[BS_RNG] == 0) {          /* raise f0..f0+4           */
                     if (wrapped || e->frame >= f0 + 4) {
                         e->bs[BS_RNG] = 1;
-                        e->bs[BS_AF]  = 12;       /* first shot ~0.2 s in     */
+                        e->bs[BS_AF]  = 12;
                         pd_range(e, f0 + 5, f0 + 12, 0);
                     }
-                } else if (e->bs[BS_RNG] == 1) {   /* loop f0+5..f0+12 + fire  */
+                } else if (e->bs[BS_RNG] == 1) {   /* loop f0+5..f0+12 + fire   */
                     int nl = rb_lane(b);
-                    if (nl != lane) {              /* kid moved -> re-aim pose */
+                    if (nl != lane) {              /* kid moved -> re-aim pose  */
                         e->bs[BS_KT] = lane = nl;
                         f0 = 88 + lane * 17;
                         pd_range(e, f0 + 5, f0 + 12, 0);
                     }
-                    if (--e->bs[BS_AF] <= 0) {     /* rapid fire (~3 / second)  */
-                        e->bs[BS_AF] = 20;
-                        int sx = e->x + DX[lane], sy = e->y + DY[lane];
-                        int ty = rb_button_cy(b, lane, FB[lane]);
-                        int dt = sx > 40 ? sx / 20 : 1;
-                        int vy = (ty - sy) / dt;
-                        if (vy >  20) vy =  20;
-                        if (vy < -20) vy = -20;
-                        spawn_proj(b, 14, sx, sy, -20, vy, 0, 240);
+                    if (--e->bs[BS_AF] <= 0) {
+                        e->bs[BS_AF] = 20;                 /* cadence (kept)    */
+                        spawn_proj(b, 14, e->x + RB_DX[lane], e->y + RB_DY[lane],
+                                   -20, RB_VY[lane], 0, 240);
                         if (--e->bs[BS_N] <= 0) {
                             e->bs[BS_RNG] = 2;
-                            pd_range(e, f0 + 13, f0 + 16, 0);   /* lower       */
+                            pd_range(e, f0 + 13, f0 + 16, 0);  /* lower        */
                         }
                     }
                 } else if (wrapped || e->frame >= f0 + 16) {   /* lower done   */
-                    if (b->h.voice)
-                        b->h.voice((e->bs[BS_COOL]++ & 1)
-                                       ? RB_STATE41 : RB_TAUNT[brand(b, 5)],
-                                   b->h.user);
-                    if (b->h.sfx)
-                        b->h.sfx(FA_BEH_SFX_BOSS_CHARGE, 14, b->h.user); /* w3sf05 */
-                    e->bs[BS_LS] = 355;
-                    e->bs[BS_RT] = 210 + brand(b, 40);   /* reload 1.5x slower */
-                    pd_range(e, 19, 37, 0);      /* Breathe B, looping       */
+                    e->bs[BS_LS] = 340;
                 }
                 touch_player(b, bx0,by0,bx1,by1);
                 return 0;
             }
 
-            case 300:                              /* took a hit: RBGE02      */
+            case 340: {                            /* exe 12 wait + 40 roll    */
+                int r = brand(b, 5);
+                if (b->h.voice) b->h.voice(RB_TAUNT[r], b->h.user);
+                e->anim_extra_delay = 3;
+                if (r < 2) {                       /* rb0011/rb0002 -> talk    */
+                    e->bs[BS_LS]  = 320;
+                    e->bs[BS_RNG] = 0;
+                    pd_range(e, 172, 176, 0);
+                } else {                           /* rb0008/rb0001/rb0013     */
+                    e->bs[BS_LS] = 330;           /* -> breathe, then 325     */
+                    e->bs[BS_KT] = 0;
+                    pd_range(e, 19, 37, 0);
+                    if (b->h.sfx)
+                        b->h.sfx(FA_BEH_SFX_BOSS_CHARGE, 14, b->h.user);
+                }
+                touch_player(b, bx0,by0,bx1,by1);
+                return 0;
+            }
+
+            case 300:                              /* took a hit: RBGE02 (exe 100/101) */
+            default:
                 b->rb_btn[0] = b->rb_btn[1] = b->rb_btn[2] = 0; /* buttons reset */
                 b->rb_pipe = 0;
                 if (wrapped) {
@@ -1416,31 +1563,20 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
                         b->boss_hp = -1;
                         b->boss_defeated = 1;
                         e->bs[BS_LS] = 310;
+                        e->bs[BS_AF] = 0;         /* arm the KO-anim sfx latch */
                         e->collision_enabled = 0;
+                        e->anim_extra_delay = 3;
                         pd_range(e, 49, 71, 0);    /* RBKO02                  */
                         if (b->h.score) b->h.score(10000, b->h.user);
-                        if (b->h.sfx)
+                        if (b->h.sfx)             /* w3sf04a ch9 (exe 0x40E1D5) */
                             b->h.sfx(FA_BEH_SFX_BOSS_KO, 14, b->h.user);
-                    } else {
+                    } else {                      /* exe 101: rb0004 -> talk 50 */
                         if (b->h.voice) b->h.voice(RB_HIT, b->h.user);
-                        e->bs[BS_LS]  = 340;
-                        /* +~1 s recover before the next charge: the old
-                         * 30..70 felt too snappy after a hit (owner). */
-                        e->bs[BS_RT]  = 90 + brand(b, 40);
-                        pd_range(e, 0, 18, 0);    /* RBAD01 idle             */
+                        e->bs[BS_LS]  = 320;
+                        e->bs[BS_RNG] = 0;
+                        e->anim_extra_delay = 3;
+                        pd_range(e, 172, 176, 0); /* RBTL02                  */
                     }
-                }
-                touch_player(b, bx0,by0,bx1,by1);
-                return 0;
-
-            default:                               /* 340 idle (exe state 1)  */
-                if (--e->bs[BS_RT] <= 0) {
-                    e->bs[BS_LS]  = 355;          /* -> Breathe B / reload    */
-                    e->bs[BS_RT]  = 210 + brand(b, 40);   /* reload 1.5x slower */
-                    pd_range(e, 19, 37, 0);        /* Breathe B, looping      */
-                    if (b->h.voice) b->h.voice(RB_STATE41, b->h.user); /* rb0010 */
-                    if (b->h.sfx)
-                        b->h.sfx(FA_BEH_SFX_BOSS_CHARGE, 14, b->h.user); /* w3sf05 */
                 }
                 touch_player(b, bx0,by0,bx1,by1);
                 return 0;
