@@ -9,7 +9,7 @@ You need to own the game for OpenFA to play it.
 - [x] Levels load
 - [x] Pickups work as intended
 - [x] Boss fights
-- [ ] Scoreboard
+- [x] Scoreboard
 - [ ] Polish
 
 ## Extras:
@@ -42,7 +42,6 @@ This game had **two** releases: one with each level you could find separately (f
 
 ## Known issues
 These issues will be addressed in the polish phase, but still worth noting.
-- Some background noises aren't placed properly
 - Some things feel wrong (ex. climbing)
 
 ## Build
