@@ -145,7 +145,13 @@ struct fa_beh {
     fa_entity_store *store;
     fa_beh_hooks     h;
 
-    int  px, py, phw, ph, pface, pif;   /* player snapshot (begin_frame)  */
+    fa_beh_player players[FA_BEH_MAX_PLAYERS];
+    int  player_count;
+    int  target_player;
+
+    /* Current nearest-player alias. The behavior state machines below use this
+     * view for their existing single-target comparisons. */
+    int  px, py, phw, ph, pface, pif, pchar;
     struct fa_snowball *snow;
     int  snow_max;
 
@@ -154,7 +160,6 @@ struct fa_beh {
     int   boss_defeated;               /* RRR-59: the gorilla KO has fired    */
     int   recipe_done;                 /* RRR-59: the 7th piece (i7) was taken */
     int   world;                       /* 1..4, for the Paradiso level cue  */
-    int   pchar;                       /* active character 0/1 (0x4E1020)   */
     int   ammo_dirty;                  /* 1 = "dirty" (black) snowballs, ds:0x4E1044.
                                         * RRR-60: only these hurt the yeti boss. */
     int   ib_phase;                    /* RRR-60 yeti<->ice-block handshake, ds:0x4E0B24:
@@ -169,7 +174,8 @@ struct fa_beh {
 
     fa_rng rng;                        /* RRR-52: the shared enemy RNG stream */
 
-    int   pending_dmg, pending_kb;
+    int   pending_dmg[FA_BEH_MAX_PLAYERS];
+    int   pending_kb[FA_BEH_MAX_PLAYERS];
 };
 
 /* ---- helpers --------------------------------------------------- */
@@ -255,6 +261,46 @@ static int overlap(int ax0,int ay0,int ax1,int ay1,int bx0,int by0,int bx1,int b
     return !(ax1 < bx0 || ax0 > bx1 || ay1 < by0 || ay0 > by1);
 }
 
+/* Preserve the original one-target behavior code by selecting the nearest
+ * active local player before each object callback. */
+static void select_player(fa_beh *b, int ex, int ey)
+{
+    int best = -1;
+    int64_t best_d = 0;
+    for (int i = 0; i < b->player_count; i++) {
+        const fa_beh_player *p = &b->players[i];
+        if (!p->active) continue;
+        int64_t dx = (int64_t)p->feet_x - ex;
+        int64_t dy = (int64_t)p->feet_y - ey;
+        int64_t d = dx * dx + dy * dy;
+        if (best < 0 || d < best_d) {
+            best = i;
+            best_d = d;
+        }
+    }
+
+    b->target_player = best;
+    if (best < 0) {
+        b->px = b->py = b->phw = b->ph = 0;
+        b->pface = 1;
+        b->pif = 1;
+        b->pchar = 0;
+        b->snow = NULL;
+        b->snow_max = 0;
+        return;
+    }
+
+    const fa_beh_player *p = &b->players[best];
+    b->px = p->feet_x; b->py = p->feet_y;
+    b->phw = p->half_w > 0 ? p->half_w : 40;
+    b->ph  = p->height > 0 ? p->height : 190;
+    b->pface = p->facing < 0 ? -1 : 1;
+    b->pif = p->iframes;
+    b->pchar = p->character ? 1 : 0;
+    b->snow = p->snow;
+    b->snow_max = p->snow_max;
+}
+
 /* RRR-61: the robot boss aim lane. The exe (0x40D7B7) buckets the player's
  * SCREEN x at 0x120 / 0x240, but the owner prefers our own read: the lane is
  * the wall button (ObjNr 83) whose frame-box centre Y is nearest the kid's
@@ -296,6 +342,32 @@ static void player_box(const fa_beh *b, int *x0,int *y0,int *x1,int *y1)
 {
     *x0 = b->px - b->phw;  *x1 = b->px + b->phw;
     *y0 = b->py - b->ph;   *y1 = b->py;
+}
+
+static int nearest_contact_player(fa_beh *b, int ex0, int ey0,
+                                  int ex1, int ey1)
+{
+    int best = -1;
+    int64_t best_d = 0;
+    int cx = (ex0 + ex1) / 2, cy = (ey0 + ey1) / 2;
+    for (int i = 0; i < b->player_count; i++) {
+        const fa_beh_player *p = &b->players[i];
+        if (!p->active || p->iframes != 0) continue;
+        int hw = p->half_w > 0 ? p->half_w : 40;
+        int h = p->height > 0 ? p->height : 190;
+        if (!overlap(ex0, ey0, ex1, ey1,
+                     p->feet_x - hw, p->feet_y - h,
+                     p->feet_x + hw, p->feet_y))
+            continue;
+        int64_t dx = (int64_t)p->feet_x - cx;
+        int64_t dy = (int64_t)p->feet_y - cy;
+        int64_t d = dx * dx + dy * dy;
+        if (best < 0 || d < best_d) {
+            best = i;
+            best_d = d;
+        }
+    }
+    return best;
 }
 
 /*
@@ -384,14 +456,17 @@ static void spawn_proj(fa_beh *b, int owner_obj, int wx, int wy,
 /* consume the first player snowball whose point lands in the box; 1 = hit. */
 static int snow_hit(fa_beh *b, int x0,int y0,int x1,int y1)
 {
-    if (!b->snow) return 0;
-    for (int k = 0; k < b->snow_max; k++) {
-        struct fa_snowball *s = &b->snow[k];
-        if (!s->alive) continue;
-        int sx = s->x >> 16, sy = s->y >> 16;
-        if (sx < x0 || sx > x1 || sy < y0 || sy > y1) continue;
-        s->alive = 0;
-        return 1;
+    for (int i = 0; i < b->player_count; i++) {
+        const fa_beh_player *pl = &b->players[i];
+        if (!pl->active || !pl->snow) continue;
+        for (int k = 0; k < pl->snow_max; k++) {
+            struct fa_snowball *s = &pl->snow[k];
+            if (!s->alive) continue;
+            int sx = s->x >> 16, sy = s->y >> 16;
+            if (sx < x0 || sx > x1 || sy < y0 || sy > y1) continue;
+            s->alive = 0;
+            return 1;
+        }
     }
     return 0;
 }
@@ -399,12 +474,20 @@ static int snow_hit(fa_beh *b, int x0,int y0,int x1,int y1)
 /* 0x41A3E0: contact -> 20 damage, unless i-frames are up. */
 static void touch_player(fa_beh *b, int ex0,int ey0,int ex1,int ey1)
 {
-    if (b->pif != 0) return;
-    int qx0,qy0,qx1,qy1;
-    player_box(b, &qx0,&qy0,&qx1,&qy1);
+    /* A shared-health co-op run still has one target per enemy. Select the
+     * closest player whose contact box actually overlaps; exact ties retain
+     * Penguin (slot 0), matching the attack-gate selection. */
+    int i = nearest_contact_player(b, ex0, ey0, ex1, ey1);
+    if (i < 0) return;
+    const fa_beh_player *p = &b->players[i];
+    if (!p->active || p->iframes != 0) return;
+    int qx0 = p->feet_x - (p->half_w > 0 ? p->half_w : 40);
+    int qx1 = p->feet_x + (p->half_w > 0 ? p->half_w : 40);
+    int height = p->height > 0 ? p->height : 190;
+    int qy0 = p->feet_y - height, qy1 = p->feet_y;
     if (overlap(ex0,ey0,ex1,ey1, qx0,qy0,qx1,qy1)) {
-        b->pending_dmg = 20;
-        b->pending_kb  = 1;
+        b->pending_dmg[i] = 20;
+        b->pending_kb[i]  = 1;
     }
 }
 
@@ -646,6 +729,7 @@ static int beh_paradiso(fa_entity_rec *e, int wrapped, void *ctx)
     (void)wrapped;
     fa_beh *b = (fa_beh *)ctx;
     int idx = rec_index(b, e);
+    select_player(b, e->x, e->y);
     int tut = ((unsigned char)e->raw[0x2a] != 10);   /* 0..9 = a tutorial one */
 
     if (!e->bs[BS_INIT]) {
@@ -769,6 +853,7 @@ static int beh_broesel(fa_entity_rec *e, int wrapped, void *ctx)
 {
     fa_beh *b = (fa_beh *)ctx;
     int idx = rec_index(b, e);
+    select_player(b, e->x, e->y);
 
     if (!e->bs[BS_INIT]) {
         e->bs[BS_INIT] = 1;
@@ -893,6 +978,7 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
     const edesc *d = desc_for(e->obj_nr);
     if (!d) return 1;
     int idx = rec_index(b, e);
+    select_player(b, e->x, e->y);
 
     /* --- init (rec[0x62] == 0) --- */
     if (!e->bs[BS_INIT]) {
@@ -1842,6 +1928,7 @@ static int beh_i7(fa_entity_rec *e, int wrapped, void *ctx)
 {
     (void)wrapped;
     fa_beh *b = (fa_beh *)ctx;
+    select_player(b, e->x, e->y);
 
     if (!e->bs[BS_INIT]) {
         e->bs[BS_INIT] = 1;
@@ -1930,6 +2017,7 @@ static int beh_iceblock(fa_entity_rec *e, int wrapped, void *ctx)
 {
     (void)wrapped;
     fa_beh *b = (fa_beh *)ctx;
+    select_player(b, e->x, e->y);
 
     if (!e->bs[BS_INIT]) {
         e->bs[BS_INIT] = 1;
@@ -1989,6 +2077,7 @@ static int beh_icicle(fa_entity_rec *e, int wrapped, void *ctx)
 {
     (void)wrapped;
     fa_beh *b = (fa_beh *)ctx;
+    select_player(b, e->x, e->y);
 
     if (!e->bs[BS_INIT]) {
         e->bs[BS_INIT] = 1;
@@ -2274,12 +2363,17 @@ void fa_beh_set_world(fa_beh *b, int world)
 
 void fa_beh_set_character(fa_beh *b, int character)
 {
-    if (b) b->pchar = character ? 1 : 0;
+    if (!b) return;
+    b->pchar = character ? 1 : 0;
+    b->players[0].character = b->pchar;
 }
 
 void fa_beh_set_ammo_dirty(fa_beh *b, int dirty)
 {
-    if (b) b->ammo_dirty = dirty ? 1 : 0;
+    if (!b) return;
+    b->ammo_dirty = dirty ? 1 : 0;
+    for (int i = 0; i < FA_BEH_MAX_PLAYERS; i++)
+        b->players[i].ammo_dirty = b->ammo_dirty;
 }
 
 void fa_beh_seed(fa_beh *b, uint32_t seed)
@@ -2329,14 +2423,36 @@ void fa_beh_begin_frame(fa_beh *b, int feet_x, int feet_y,
                         struct fa_snowball *snow, int snow_max)
 {
     if (!b) return;
-    b->px = feet_x; b->py = feet_y;
-    b->phw = half_w > 0 ? half_w : 40;
-    b->ph  = height > 0 ? height : 190;
-    b->pface = facing < 0 ? -1 : 1;
-    b->pif = iframes;
-    b->snow = snow; b->snow_max = snow_max;
-    b->pending_dmg = 0;
-    b->pending_kb  = 0;
+    fa_beh_player p;
+    memset(&p, 0, sizeof p);
+    p.active = 1;
+    p.feet_x = feet_x; p.feet_y = feet_y;
+    p.half_w = half_w; p.height = height;
+    p.facing = facing; p.iframes = iframes;
+    p.character = b->pchar;
+    p.ammo_dirty = b->ammo_dirty;
+    p.snow = snow; p.snow_max = snow_max;
+    fa_beh_begin_players(b, &p, 1);
+}
+
+void fa_beh_begin_players(fa_beh *b, const fa_beh_player *players, int count)
+{
+    if (!b) return;
+    if (count < 0) count = 0;
+    if (count > FA_BEH_MAX_PLAYERS) count = FA_BEH_MAX_PLAYERS;
+
+    memset(b->players, 0, sizeof b->players);
+    if (players && count > 0)
+        memcpy(b->players, players, (size_t)count * sizeof *players);
+    b->player_count = count;
+    b->target_player = -1;
+    b->ammo_dirty = count > 0 ? b->players[0].ammo_dirty : 0;
+    memset(b->pending_dmg, 0, sizeof b->pending_dmg);
+    memset(b->pending_kb, 0, sizeof b->pending_kb);
+    if (count > 0)
+        select_player(b, b->players[0].feet_x, b->players[0].feet_y);
+    else
+        select_player(b, 0, 0);
 }
 
 int fa_beh_post(fa_beh *b, int *knockback)
@@ -2348,31 +2464,33 @@ int fa_beh_post(fa_beh *b, int *knockback)
      * snowball is consumed. */
     for (int i = 0; i < FA_BEH_MAX_PROJ; i++) {
         bproj *p = &b->proj[i];
-        if (!p->alive || p->owner_obj != 10 || p->reflected || !b->snow) continue;
+        if (!p->alive || p->owner_obj != 10 || p->reflected) continue;
         if (p->vx >= 0) continue;                  /* 0x40C2E9: only vx < 0    */
         int cx = p->x >> 16, cy = p->y >> 16;
-        for (int k = 0; k < b->snow_max; k++) {
-            struct fa_snowball *s = &b->snow[k];
-            if (!s->alive) continue;
-            int sx = s->x >> 16, sy = s->y >> 16;
-            if (sx < cx - 24 || sx > cx + 24 || sy < cy - 24 || sy > cy + 24)
-                continue;
-            s->alive = 0;
-            p->reflected = 1;
-            /* 0x40C318 / 0x40C328 / 0x40C331: vx -> +9.0; vy -> -9.0 when the
-             * coconut's own gravity > 0.1 (the lob variant, grav 0.3) else
-             * -0.5 (the flat variant, grav 0.03 - it skims back into the
-             * torso). Gravity is NOT changed by the reflect. */
-            p->vx = FX_9_0;
-            p->vy = (p->grav > FX_0_03) ? -FX_9_0 : -FX_0_5;
-            p->life = 120;
-            if (b->h.sfx) b->h.sfx(FA_BEH_SFX_BOSS_HIT, 10, b->h.user);
-            break;
+        for (int j = 0; j < b->player_count && !p->reflected; j++) {
+            const fa_beh_player *pl = &b->players[j];
+            if (!pl->active || !pl->snow) continue;
+            for (int k = 0; k < pl->snow_max; k++) {
+                struct fa_snowball *s = &pl->snow[k];
+                if (!s->alive) continue;
+                int sx = s->x >> 16, sy = s->y >> 16;
+                if (sx < cx - 24 || sx > cx + 24 || sy < cy - 24 || sy > cy + 24)
+                    continue;
+                s->alive = 0;
+                p->reflected = 1;
+                /* 0x40C318 / 0x40C328 / 0x40C331: vx -> +9.0; vy -> -9.0 when the
+                 * coconut's own gravity > 0.1 (the lob variant, grav 0.3) else
+                 * -0.5 (the flat variant, grav 0.03 - it skims back into the
+                 * torso). Gravity is NOT changed by the reflect. */
+                p->vx = FX_9_0;
+                p->vy = (p->grav > FX_0_03) ? -FX_9_0 : -FX_0_5;
+                p->life = 120;
+                if (b->h.sfx) b->h.sfx(FA_BEH_SFX_BOSS_HIT, 10, b->h.user);
+                break;
+            }
         }
     }
 
-    int px0,py0,px1,py1;
-    player_box(b, &px0,&py0,&px1,&py1);
     for (int i = 0; i < FA_BEH_MAX_PROJ; i++) {
         bproj *p = &b->proj[i];
         if (!p->alive) continue;
@@ -2419,16 +2537,36 @@ int fa_beh_post(fa_beh *b, int *knockback)
             }
         }
 
-        /* an ordinary (not turned-back) projectile hurts the player on contact */
-        if (!p->reflected && b->pif == 0 &&
-            wx >= px0 && wx <= px1 && wy >= py0 && wy <= py1) {
-            p->alive = 0;
-            b->pending_dmg = 20;
-            b->pending_kb  = 1;
+        /* an ordinary (not turned-back) projectile hurts the first player it
+         * reaches. Contact is resolved by nearest overlapping player. */
+        if (!p->reflected) {
+            int j = nearest_contact_player(b, wx, wy, wx, wy);
+            if (j >= 0) {
+                p->alive = 0;
+                b->pending_dmg[j] = 20;
+                b->pending_kb[j] = 1;
+            }
         }
     }
-    if (knockback) *knockback = b->pending_kb;
-    return b->pending_dmg;
+    int total = 0, any_kb = 0;
+    for (int i = 0; i < b->player_count; i++) {
+        total += b->pending_dmg[i];
+        if (b->pending_kb[i]) any_kb = 1;
+    }
+    if (knockback) *knockback = any_kb;
+    return total;
+}
+
+int fa_beh_damage_player(const fa_beh *b, int player)
+{
+    if (!b || player < 0 || player >= FA_BEH_MAX_PLAYERS) return 0;
+    return b->pending_dmg[player];
+}
+
+int fa_beh_knockback_player(const fa_beh *b, int player)
+{
+    if (!b || player < 0 || player >= FA_BEH_MAX_PLAYERS) return 0;
+    return b->pending_kb[player];
 }
 
 int fa_beh_enemies_alive(const fa_beh *b)

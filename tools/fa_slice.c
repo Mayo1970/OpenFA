@@ -21,6 +21,13 @@
  *       Mouse, keyboard arrows, and a controller D-pad select a world;
  *       Enter / controller A confirms it.
  * Level (--world N): arrows walk, A jump, S throw, D switch kid. Esc quits.
+ *   ENTER / controller START enables local co-op: the input that joins takes
+ *   Milchschnitte, while the other input takes Penguin. With one controller,
+ *   ENTER therefore makes the keyboard Milchschnitte and the controller
+ *   Penguin; with two controllers, START assigns the joining pad to
+ *   Milchschnitte and the other pad to Penguin. With keyboard-only co-op,
+ *   the two layouts are swapped accordingly. T teleports Milchschnitte near
+ *   Penguin; on her controller, LB performs the same teleport.
  *   P  toggle free-move (dev): fly through walls to reach the pickups; hold
  *      A while flying for a fast dash. Pickups and the boss gate still work.
  *   I  skip straight to this world's boss arena (dev).
@@ -87,7 +94,13 @@ typedef struct {
     int          dirty_shot;   /* RRR-51 AC4: collect_dirtyballs was taken */
     fa_camera    cam;
     fa_player pl;
+    fa_player pl2;                /* co-op Milchschnitte */
     int       use_player;
+    int       coop;
+    int       p1_controller;      /* -1 = keyboard role, otherwise pad 0..1 */
+    int       p2_controller;      /* -1 = keyboard role, otherwise pad 0..1 */
+    int       keyboard_roles_swapped; /* ENTER-only: P2 main keyboard, P1 alt */
+    int       death_player;       /* player that triggered the shared KO       */
     int       freemove;         /* P toggle: fly through the level, no clip  */
 
     /* RRR-57: the retail exe seeds the one rand() stream from the wall clock
@@ -128,6 +141,12 @@ typedef struct {
     int       score;        /* RRR-50: pickups collected                   */
     int       hurt_cd;      /* RRR-50: ticks of hit invulnerability left   */
     int       push_was;     /* RRR-50: previous tick was shoving a block   */
+    int       kid_was_crouch2;
+    int       kid_rise2;
+    int       jump_was2;
+    int       thr_was2;
+    int       glide_was2;
+    int       push_was2;
 
     /* physics-tuning overrides (px/tick), <=0 = keep the default */
     double    ov_gravity, ov_jumpvel, ov_jumpvel2, ov_runspeed, ov_airaccel;
@@ -172,6 +191,130 @@ static void slice_merge_pad_movement(const fa_frame_input *fi, uint32_t *m)
     if (b & (1u << FA_PAD_Y)) *m |= 1u << FA_ACT_SPARE;
 }
 
+/* Gameplay mapping for one controller slot.  The legacy helper above is kept
+ * for the menu and for old callers that only know about pad slot 0. */
+static uint32_t slice_pad_actions(const fa_frame_pad *pad)
+{
+    uint32_t m = 0;
+    uint32_t b = pad ? pad->down : 0;
+    float lx = pad ? pad->lx : 0.0f;
+    float ly = pad ? pad->ly : 0.0f;
+    if ((b & (1u << FA_PAD_DPAD_LEFT)) || lx < -0.35f)
+        m |= 1u << FA_ACT_LEFT;
+    if ((b & (1u << FA_PAD_DPAD_RIGHT)) || lx > 0.35f)
+        m |= 1u << FA_ACT_RIGHT;
+    if ((b & (1u << FA_PAD_DPAD_UP)) || ly < -0.35f)
+        m |= 1u << FA_ACT_UP;
+    if ((b & (1u << FA_PAD_DPAD_DOWN)) || ly > 0.35f)
+        m |= 1u << FA_ACT_DOWN;
+    if (b & (1u << FA_PAD_A)) m |= 1u << FA_ACT_JUMP;
+    if (b & (1u << FA_PAD_B)) m |= 1u << FA_ACT_FIRE;
+    if (b & (1u << FA_PAD_Y)) m |= 1u << FA_ACT_SPARE;
+    return m;
+}
+
+static uint32_t slice_player_actions(const slice *s, const fa_frame_input *fi,
+                                     int player)
+{
+    uint32_t m;
+    if (!s->coop)
+        return player == 0 ? fi->actions | slice_pad_actions(&fi->pads[0]) : 0;
+
+    if (player == 0) {
+        m = s->p1_controller >= 0 && s->p1_controller < FA_APP_MAX_PADS
+          ? slice_pad_actions(&fi->pads[s->p1_controller])
+          : (s->keyboard_roles_swapped ? fi->keyboard2_actions
+                                       : fi->keyboard_actions);
+    } else {
+        m = s->p2_controller >= 0 && s->p2_controller < FA_APP_MAX_PADS
+          ? slice_pad_actions(&fi->pads[s->p2_controller])
+          : (s->keyboard_roles_swapped ? fi->keyboard_actions
+                                       : fi->keyboard2_actions);
+    }
+    /* Character switching is deliberately unavailable in co-op. */
+    return m & ~FA_PI_SWITCH;
+}
+
+static void slice_teleport_milch(slice *s);
+
+static int slice_join_coop(slice *s, const fa_frame_input *fi)
+{
+    if (s->coop) return 0;
+
+    int join_pad = -1;
+    for (int i = 0; i < FA_APP_MAX_PADS; i++) {
+        if (fi->pads[i].pressed & (1u << FA_PAD_START)) {
+            join_pad = i;
+            break;
+        }
+    }
+    int join_keyboard = (fi->edit_pressed & FA_EDIT_ENTER) != 0;
+    if (join_pad < 0 && !join_keyboard) return 0;
+
+    s->coop = 1;
+    /* Co-op always has a stable role split, even if single-player had
+     * previously switched the active character. */
+    s->pl.character = 0;
+    s->pl.swap_timer = 0;
+    if (s->pl.state == FA_PST_SWAP) s->pl.state = FA_PST_STAND;
+    s->p2_controller = join_pad;
+    s->p1_controller = -1;
+    s->keyboard_roles_swapped = 0;
+    if (join_pad >= 0) {
+        /* When two pads are present, the pad that joined gets Milchschnitte
+         * and the other pad remains Penguin's controller. */
+        for (int i = 0; i < FA_APP_MAX_PADS; i++) {
+            if (i != join_pad && fi->pads[i].connected) {
+                s->p1_controller = i;
+                break;
+            }
+        }
+    } else {
+        /* ENTER joins from the keyboard, so the keyboard becomes
+         * Milchschnitte's input. If a pad is attached, it remains Penguin's
+         * input; otherwise the alternate keyboard layout becomes Penguin's
+         * input. */
+        s->p2_controller = -1;
+        s->keyboard_roles_swapped = 1;
+        for (int i = 0; i < FA_APP_MAX_PADS; i++) {
+            if (fi->pads[i].connected) {
+                s->p1_controller = i;
+                break;
+            }
+        }
+    }
+    slice_teleport_milch(s);
+    const char *penguin = s->p1_controller >= 0 ? "controller"
+        : (s->keyboard_roles_swapped ? "I/J/K/L + U/O" : "keyboard");
+    const char *milch = s->p2_controller >= 0 ? "controller"
+        : (s->keyboard_roles_swapped ? "keyboard (T teleport)"
+                                     : "I/J/K/L + U/O (T teleport)");
+    printf("local co-op enabled: Penguin=%s, Milchschnitte=%s\n",
+           penguin, milch);
+    return 1;
+}
+
+static void slice_teleport_milch(slice *s)
+{
+    int px = fa_player_px(&s->pl);
+    int side = s->pl.facing == FA_FACE_RIGHT ? -1 : 1;
+    int x = px + side * 48;
+    if (x < s->pl2.t.body_hw) x = s->pl2.t.body_hw;
+    if (x > s->map.world_w - s->pl2.t.body_hw)
+        x = s->map.world_w - s->pl2.t.body_hw;
+    s->pl2.x = FA_FIX(x);
+    s->pl2.y = s->pl.y;
+    s->pl2.vx = s->pl2.vy = 0;
+    s->pl2.on_ground = s->pl.on_ground;
+    s->pl2.state = FA_PST_STAND;
+    s->pl2.gliding = 0;
+    s->pl2.throw_anim = 0;
+    s->pl2.throw_timer = 0;
+    s->pl2.facing = s->pl.facing;
+    s->pl2.idle_kind = s->pl2.idle_play = 0;
+    s->pl2.idle_timer = s->pl2.t.idle_delay;
+}
+
 /* decode one .W01 frame and blit it colour-keyed, centred on (cx, cy) in the
  * destination surface. Returns 1 on success, 0 if there is no sheet / the
  * frame is out of range / decode failed. */
@@ -194,13 +337,16 @@ static int blit_w01_centered(const fa_surface *dst, const fa_w01 *w,
 
 static void apply_tuning(slice *s)
 {
-    if (s->ov_gravity   > 0) s->pl.t.gravity     = (int32_t)(s->ov_gravity   * FA_FIX_ONE);
-    if (s->ov_jumpvel   > 0) s->pl.t.jump_vel    = -(int32_t)(s->ov_jumpvel  * FA_FIX_ONE);
-    if (s->ov_jumpvel2  > 0) s->pl.t.jump_vel_c1 = -(int32_t)(s->ov_jumpvel2 * FA_FIX_ONE);
-    if (s->ov_runspeed  > 0) s->pl.t.run_speed   = (int32_t)(s->ov_runspeed  * FA_FIX_ONE);
-    if (s->ov_airaccel  > 0) s->pl.t.air_accel   = (int32_t)(s->ov_airaccel  * FA_FIX_ONE);
-    if (s->ov_bboxw     > 0) s->pl.t.body_hw     = s->ov_bboxw;
-    if (s->ov_bboxh     > 0) s->pl.t.body_h      = s->ov_bboxh;
+    fa_player *p[2] = { &s->pl, &s->pl2 };
+    for (int i = 0; i < 2; i++) {
+        if (s->ov_gravity   > 0) p[i]->t.gravity     = (int32_t)(s->ov_gravity   * FA_FIX_ONE);
+        if (s->ov_jumpvel   > 0) p[i]->t.jump_vel    = -(int32_t)(s->ov_jumpvel  * FA_FIX_ONE);
+        if (s->ov_jumpvel2  > 0) p[i]->t.jump_vel_c1 = -(int32_t)(s->ov_jumpvel2 * FA_FIX_ONE);
+        if (s->ov_runspeed  > 0) p[i]->t.run_speed   = (int32_t)(s->ov_runspeed  * FA_FIX_ONE);
+        if (s->ov_airaccel  > 0) p[i]->t.air_accel   = (int32_t)(s->ov_airaccel  * FA_FIX_ONE);
+        if (s->ov_bboxw     > 0) p[i]->t.body_hw     = s->ov_bboxw;
+        if (s->ov_bboxh     > 0) p[i]->t.body_h      = s->ov_bboxh;
+    }
 }
 
 static int load_world(slice *s, const char *maps, int world,
@@ -566,7 +712,13 @@ static void wire_level(slice *s)
     printf("spawn: kid at %d,%d (world %dx%d)\n", sx, sy,
            s->map.world_w, s->map.world_h);
     fa_player_init(&s->pl, sx, sy);
+    int sx2 = sx + 64;
+    if (sx2 > s->map.world_w - 16) sx2 = s->map.world_w - 16;
+    if (sx2 < 16) sx2 = 16;
+    fa_player_init(&s->pl2, sx2, sy);
+    s->pl2.character = 1;       /* co-op partner is always Milchschnitte */
     s->pl.t.floor_y = FA_FIX(s->map.world_h - 32);
+    s->pl2.t.floor_y = s->pl.t.floor_y;
 
     s->coll.map = &s->map;
     s->coll.ts = s->tiles;
@@ -574,6 +726,9 @@ static void wire_level(slice *s)
     fa_player_set_ladder(&s->pl, slice_ladder, &s->map);
     fa_player_set_solid(&s->pl, slice_solid, &s->coll);
     fa_player_set_pushable(&s->pl, slice_pushable, s->ents);
+    fa_player_set_ladder(&s->pl2, slice_ladder, &s->map);
+    fa_player_set_solid(&s->pl2, slice_solid, &s->coll);
+    fa_player_set_pushable(&s->pl2, slice_pushable, s->ents);
     if (s->ents)
         fa_entity_set_terrain(s->ents, slice_terrain, &s->coll);
 
@@ -581,6 +736,12 @@ static void wire_level(slice *s)
     fa_beh_free(s->beh);
     s->beh = NULL;
     s->freemove = 0;             /* DEV: always start a level clipped */
+    s->death_player = 0;
+    s->swap_was = s->jump_was = s->thr_was = s->glide_was = 0;
+    s->push_was = 0;
+    s->kid_was_crouch = s->kid_rise = 0;
+    s->kid_was_crouch2 = s->kid_rise2 = 0;
+    s->jump_was2 = s->thr_was2 = s->glide_was2 = s->push_was2 = 0;
     s->health = 100;             /* 0x45F014 init (0x4086fb) */
     s->ammo = 10;               /* 0x45ED34 init (0x4086f1) */
     s->dirty_shot = 0;
@@ -720,6 +881,62 @@ static fa_cs_pose kid_pose(const fa_player *p)
     }
 }
 
+/* Publish both live player bodies to the enemy layer.  Health, ammo and
+ * pickups stay in `slice`, so this view contains no duplicated resources. */
+static void slice_beh_begin(slice *s)
+{
+    if (!s->beh) return;
+    fa_beh_player p[2];
+    memset(p, 0, sizeof p);
+    p[0].active = 1;
+    p[0].feet_x = fa_player_px(&s->pl);
+    p[0].feet_y = fa_player_py(&s->pl);
+    p[0].half_w = 40;
+    p[0].height = s->pl.state == FA_PST_CROUCH ? 100 : 190;
+    p[0].facing = s->pl.facing == FA_FACE_RIGHT ? 1 : -1;
+    p[0].iframes = s->hurt_cd;
+    p[0].character = s->pl.character & 1;
+    p[0].ammo_dirty = s->dirty_shot;
+    p[0].snow = s->pl.snow;
+    p[0].snow_max = FA_MAX_SNOWBALLS;
+
+    p[1].active = s->coop;
+    p[1].feet_x = fa_player_px(&s->pl2);
+    p[1].feet_y = fa_player_py(&s->pl2);
+    p[1].half_w = 40;
+    p[1].height = s->pl2.state == FA_PST_CROUCH ? 100 : 190;
+    p[1].facing = s->pl2.facing == FA_FACE_RIGHT ? 1 : -1;
+    p[1].iframes = s->hurt_cd;
+    p[1].character = 1;
+    p[1].ammo_dirty = s->dirty_shot;
+    p[1].snow = s->pl2.snow;
+    p[1].snow_max = FA_MAX_SNOWBALLS;
+    fa_beh_set_character(s->beh, p[0].character);
+    fa_beh_set_ammo_dirty(s->beh, s->dirty_shot);
+    fa_beh_begin_players(s->beh, p, s->coop ? 2 : 1);
+}
+
+static void slice_update_kid_anim(slice *s, fa_player *p, int k,
+                                  int *was_crouch, int *rise)
+{
+    fa_cs_pose pose = kid_pose(p);
+    if (pose == FA_CS_SWAP && (p->character & 1) &&
+        p->swap_timer <= p->t.swap_end_c1)
+        pose = FA_CS_SWAP_END;
+    int crouch = pose == FA_CS_CROUCH;
+    if (*was_crouch && !crouch && p->on_ground) *rise = 14;
+    *was_crouch = crouch;
+    if (*rise > 0) { (*rise)--; pose = FA_CS_CROUCH_RISE; }
+    fa_cs_anim_set_period(&s->kid_anim[k],
+                          (p->state == FA_PST_CLIMB && !p->climb_moving)
+                          ? 0 : 2);
+    int face = p->facing;
+    if (pose == FA_CS_CLIMB && s->kid_anim[k].sheet)
+        face = -s->kid_anim[k].sheet->base_facing;
+    fa_cs_anim_set(&s->kid_anim[k], pose, face);
+    fa_cs_anim_tick(&s->kid_anim[k]);
+}
+
 /*
  * RRR-54 / PL-142: has this world's tutorial been cleared? The exe reads byte
  * world-1 of GData\Save\tut.ini (4 raw bytes) at level load; a 0 byte means
@@ -743,6 +960,12 @@ static const char *slice_world_suffix(const char *gdata, int world, int force_tu
 static void enter_world(slice *s, int world)
 {
     slice_audio_hush(s);
+    /* A new run starts in single-player.  The boss transition uses
+     * enter_end() and deliberately keeps the co-op assignment alive. */
+    s->coop = 0;
+    s->p1_controller = -1;
+    s->p2_controller = -1;
+    s->keyboard_roles_swapped = 0;
     if (s->menu) { fa_menu_free(s->menu); s->menu = NULL; }
     const char *suf = slice_world_suffix(s->gdata, world, 0);
     if (load_world(s, s->gdata, world, suf, suf) == 0) {
@@ -1034,7 +1257,22 @@ static void s_sim(uint64_t tick, const void *input, void *user)
     }
 
     if (s->use_player) {
-        int out_char = s->pl.character;
+        if (slice_join_coop(s, fi)) {
+            /* The join edge is consumed as a mode change; movement starts on
+             * the following fixed tick, avoiding an accidental jump/throw. */
+            return;
+        }
+        m = slice_player_actions(s, fi, 0);
+        uint32_t m2 = slice_player_actions(s, fi, 1);
+        if (s->coop) {
+            int teleport = 0;
+            if (s->p2_controller >= 0 && s->p2_controller < FA_APP_MAX_PADS)
+                teleport = (fi->pads[s->p2_controller].pressed &
+                            (1u << FA_PAD_LEFTSHOULDER)) != 0;
+            else
+                teleport = fi->keyboard2_teleport_pressed != 0;
+            if (teleport) slice_teleport_milch(s);
+        }
 
         /* DEV: P toggles free / no-clip movement - fly straight to the
          * recipe pieces instead of walking the level. Pickup collection,
@@ -1047,7 +1285,8 @@ static void s_sim(uint64_t tick, const void *input, void *user)
 
         /* DEV: I skips straight to this world's boss arena (Welt<N>E) so a
          * boss can be tested without replaying the whole level. */
-        if ((fi->dbg_pressed & FA_DBG_BOSS) && !s->in_end && !s->end_pending &&
+        if ((fi->dbg_pressed & FA_DBG_BOSS) && !s->coop &&
+            !s->in_end && !s->end_pending &&
             s->world >= 1 && s->world <= 4) {
             for (int i = 0; i < 6; i++) s->items[i] = 1;   /* recipe "complete" */
             s->end_pending = 1;
@@ -1066,24 +1305,29 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                 begin_after_death(s, 0);
                 return;
             }
-            if (s->beh) {
-                fa_beh_begin_frame(s->beh, fa_player_px(&s->pl),
-                                   fa_player_py(&s->pl), 40, 190,
-                                   (s->pl.facing == FA_FACE_RIGHT) ? 1 : -1,
-                                   999 /*i-frames: no more damage*/,
-                                   s->pl.snow, FA_MAX_SNOWBALLS);
-            }
+            slice_beh_begin(s);
             if (s->ents)
                 fa_entity_tick(s->ents, s->cam.x, s->cam.y, FA_FB_W, FA_FB_H);
             if (s->beh) { int kb = 0; (void)fa_beh_post(s->beh, &kb); }
             slice_posloops(s);
             fa_player_tick(&s->pl, 0);          /* no input; body settles */
+            if (s->coop) fa_player_tick(&s->pl2, 0);
             fa_camera_follow(&s->cam, fa_player_px(&s->pl), fa_player_py(&s->pl));
             if (s->have_kids) {
-                int k = s->pl.character & 1;
+                fa_player *dead = s->death_player ? &s->pl2 : &s->pl;
+                int k = s->death_player ? 1 : (s->pl.character & 1);
                 fa_cs_anim_set_period(&s->kid_anim[k], 2);
-                fa_cs_anim_set(&s->kid_anim[k], FA_CS_KO, s->pl.facing);
+                fa_cs_anim_set(&s->kid_anim[k], FA_CS_KO, dead->facing);
                 fa_cs_anim_tick(&s->kid_anim[k]);
+                if (s->coop) {
+                    fa_player *other = s->death_player ? &s->pl : &s->pl2;
+                    int ok = s->death_player ? (s->pl.character & 1) : 1;
+                    slice_update_kid_anim(s, other, ok,
+                                          s->death_player ? &s->kid_was_crouch
+                                                          : &s->kid_was_crouch2,
+                                          s->death_player ? &s->kid_rise
+                                                          : &s->kid_rise2);
+                }
             }
             return;
         }
@@ -1102,14 +1346,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
         /* RRR-50: tick the object runtime FIRST so the player's collision
          * probe sees lifts / blocks / fallers at their new positions this
          * tick (fixes the raft fall-pose and lets blocks stay solid). */
-        if (s->beh) {
-            fa_beh_set_character(s->beh, s->pl.character & 1);
-            fa_beh_set_ammo_dirty(s->beh, s->dirty_shot);
-            fa_beh_begin_frame(s->beh, fa_player_px(&s->pl), fa_player_py(&s->pl),
-                               40, (s->pl.state == FA_PST_CROUCH) ? 100 : 190,
-                               (s->pl.facing == FA_FACE_RIGHT) ? 1 : -1,
-                               s->hurt_cd, s->pl.snow, FA_MAX_SNOWBALLS);
-        }
+        slice_beh_begin(s);
         if (s->ents)
             fa_entity_tick(s->ents, s->cam.x, s->cam.y, FA_FB_W, FA_FB_H);
 
@@ -1118,6 +1355,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
          * THIS tick - otherwise crouch / throw (gated on the post-collide
          * on_ground) fail while the platform moves (owner playtest). */
         int on_lift = 0, lift_top = 0, lift_dx = 0;
+        int on_lift2 = 0, lift_top2 = 0, lift_dx2 = 0;
         if (!s->freemove && s->ents && s->pl.vy >= 0 && s->pl.state != FA_PST_JUMP) {
             int cdy = 0;
             if (fa_entity_ride(s->ents, fa_player_px(&s->pl),
@@ -1129,7 +1367,20 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                 s->pl.on_ground = 1;
             }
         }
+        if (s->coop && !s->freemove && s->ents && s->pl2.vy >= 0 &&
+            s->pl2.state != FA_PST_JUMP) {
+            int cdy = 0;
+            if (fa_entity_ride(s->ents, fa_player_px(&s->pl2),
+                               fa_player_py(&s->pl2), s->pl2.t.body_hw,
+                               &lift_top2, &lift_dx2, &cdy)) {
+                on_lift2 = 1;
+                s->pl2.y = FA_FIX(lift_top2);
+                s->pl2.vy = 0;
+                s->pl2.on_ground = 1;
+            }
+        }
 
+        int shot0_reserved = 0;
         if (s->freemove) {
             /* direct fly: arrows move, hold A for a fast dash. No physics. */
             int spd = (m & (1u << FA_ACT_JUMP)) ? 12 : 6;
@@ -1152,6 +1403,35 @@ static void s_sim(uint64_t tick, const void *input, void *user)
         } else {
             if (s->ammo <= 0) m &= ~(1u << FA_ACT_FIRE);   /* AC4: no snowballs */
             fa_player_tick(&s->pl, m);   /* FA_PI_* == (1u<<FA_ACT_*) */
+            /* Reserve Penguin's shared ammo before ticking player 2, so two
+             * simultaneous fire presses cannot consume one final snowball
+             * twice. */
+            if (s->ammo > 0 && s->pl.throw_anim > 0 && !s->thr_was) {
+                s->ammo--;
+                shot0_reserved = 1;
+            }
+        }
+        if (s->coop) {
+            /* Milchschnitte keeps her character-1 movement rules: lower
+             * jump, no penguin glide, and the normal push/climb states. */
+            if (s->freemove) {
+                int spd2 = (m2 & (1u << FA_ACT_JUMP)) ? 12 : 6;
+                int dx2 = 0, dy2 = 0;
+                if (m2 & (1u << FA_ACT_LEFT))  dx2 -= spd2;
+                if (m2 & (1u << FA_ACT_RIGHT)) dx2 += spd2;
+                if (m2 & (1u << FA_ACT_UP))    dy2 -= spd2;
+                if (m2 & (1u << FA_ACT_DOWN))  dy2 += spd2;
+                s->pl2.x += FA_FIX(dx2);
+                s->pl2.y += FA_FIX(dy2);
+                if (dx2) s->pl2.facing = dx2 < 0 ? FA_FACE_LEFT : FA_FACE_RIGHT;
+                s->pl2.vx = s->pl2.vy = 0;
+                s->pl2.on_ground = 1;
+                s->pl2.gliding = s->pl2.throw_anim = 0;
+                s->pl2.state = (dx2 || dy2) ? FA_PST_WALK : FA_PST_STAND;
+            } else {
+                if (s->ammo <= 0) m2 &= ~(1u << FA_ACT_FIRE);
+                fa_player_tick(&s->pl2, m2);
+            }
         }
         /* the swap voice line starts when the swap starts; the swap lock
          * length is that line's duration (PL-104). */
@@ -1159,11 +1439,14 @@ static void s_sim(uint64_t tick, const void *input, void *user)
         int jump_now  = (s->pl.state == FA_PST_JUMP);
         int thr_now   = (s->pl.throw_anim > 0);
         int glide_now = (s->pl.gliding != 0);       /* penguin only */
-        int c1 = (s->pl.character & 1);
+        int jump_now2 = s->coop && (s->pl2.state == FA_PST_JUMP);
+        int thr_now2  = s->coop && (s->pl2.throw_anim > 0);
+        int glide_now2 = s->coop && (s->pl2.gliding != 0);
+        int c1 = s->pl.character & 1;
         if (s->audio) {
-            if (swap_now && !s->swap_was)
-                fa_audio_event(s->audio, out_char == 0 ? FA_SND_SWAP_P2M
-                                                       : FA_SND_SWAP_M2P);
+            if (!s->coop && swap_now && !s->swap_was)
+                fa_audio_event(s->audio, c1 == 0 ? FA_SND_SWAP_P2M
+                                                 : FA_SND_SWAP_M2P);
             /* alsf01 only on a REAL jump (jump_hold is set by the input-edge
              * jump). A hit / hazard knockback also puts the kid in JUMP state
              * but must not play the jump sound (owner: "plays the jump sound
@@ -1172,21 +1455,32 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                 fa_audio_event(s->audio, c1 ? FA_SND_JUMP_M : FA_SND_JUMP_P);
             if (thr_now && !s->thr_was)
                 fa_audio_event(s->audio, c1 ? FA_SND_THROW_M : FA_SND_THROW_P);
+            if (s->coop && jump_now2 && !s->jump_was2 && s->pl2.jump_hold > 0)
+                fa_audio_event(s->audio, FA_SND_JUMP_M);
+            if (s->coop && thr_now2 && !s->thr_was2)
+                fa_audio_event(s->audio, FA_SND_THROW_M);
             if (glide_now && !s->glide_was)         /* alsf02, glide entry */
                 fa_audio_event(s->audio, FA_SND_GLIDE);
             if (!glide_now && s->glide_was)         /* exe stops lane 0 on */
                 fa_audio_stop(s->audio, 0);         /* glide exit: 0x422e04(0) */
         }
-        if (thr_now && !s->thr_was && s->ammo > 0) s->ammo--;   /* AC4: 0x45ED34-- */
+        if (thr_now && !s->thr_was && !shot0_reserved && s->ammo > 0)
+            s->ammo--;
+        if (s->coop && thr_now2 && !s->thr_was2 && s->ammo > 0) s->ammo--;
         s->swap_was  = swap_now;
         s->jump_was  = jump_now;
         s->thr_was   = thr_now;
         s->glide_was = glide_now;
+        s->jump_was2 = jump_now2;
+        s->thr_was2  = thr_now2;
+        s->glide_was2 = glide_now2;
 
         /* --- RRR-50: player <-> object coupling --- */
         if (s->ents) {
             int px = fa_player_px(&s->pl), py = fa_player_py(&s->pl);
             int face = (s->pl.facing == FA_FACE_RIGHT) ? 1 : -1;
+            int px2 = fa_player_px(&s->pl2), py2 = fa_player_py(&s->pl2);
+            int face2 = (s->pl2.facing == FA_FACE_RIGHT) ? 1 : -1;
 
             /* the pickup / hit test spans the kid's whole sprite plus the
              * overhead reach (items sit in tree-tops and along the vines;
@@ -1208,6 +1502,12 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                     fa_beh_push(s->beh, probx, py - 100, face) && s->audio)
                     fa_audio_event(s->audio, FA_SND_PUSH);   /* sound id 6 */
             }
+            if (s->coop && s->pl2.state == FA_PST_PUSH && s->beh) {
+                int probx = px2 + face2 * (s->pl2.t.body_hw + 8);
+                if (s->pl2.push_timer == 8 &&
+                    fa_beh_push(s->beh, probx, py2 - 100, face2) && s->audio)
+                    fa_audio_event(s->audio, FA_SND_PUSH);
+            }
 
             /* POST-tick: carry the platform's horizontal drift and re-plant
              * the feet (fa_player_tick's collide may have nudged them).
@@ -1221,9 +1521,24 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                 if (s->pl.state == FA_PST_FALL)
                     s->pl.state = (s->pl.vx != 0) ? FA_PST_WALK : FA_PST_STAND;
             }
+            if (s->coop && on_lift2 && s->pl2.state != FA_PST_JUMP) {
+                s->pl2.x += FA_FIX(lift_dx2);
+                s->pl2.y  = FA_FIX(lift_top2);
+                if (s->pl2.vy > 0) s->pl2.vy = 0;
+                s->pl2.on_ground = 1;
+                if (s->pl2.state == FA_PST_FALL)
+                    s->pl2.state = (s->pl2.vx != 0) ? FA_PST_WALK : FA_PST_STAND;
+            }
 
             /* collect BONUS / POWERUP pickups (PL-131) */
             int got = fa_entity_collect(s->ents, px, gcy, gw, gh, beh_pickup, s);
+            if (s->coop) {
+                int gw2 = s->pl2.t.body_hw + 26;
+                int gcy2 = py2 - s->pl2.t.body_h;
+                int gh2 = s->pl2.t.body_h + 10;
+                got += fa_entity_collect(s->ents, px2, gcy2, gw2, gh2,
+                                         beh_pickup, s);
+            }
             if (got) {
                 if (s->audio) fa_audio_event(s->audio, FA_SND_PICKUP);
                 printf("pickup x%d (score %d health %d ammo %d)\n",
@@ -1241,16 +1556,20 @@ static void s_sim(uint64_t tick, const void *input, void *user)
              * reads player vy); only the 120-tick i-frames suppress it. */
             int kb = 0;
             int dmg = s->beh ? fa_beh_post(s->beh, &kb) : 0;
+            (void)kb;
             slice_posloops(s);
             if (dmg && s->hurt_cd == 0 && !s->freemove) {
+                int hit_player = fa_beh_damage_player(s->beh, 0) ? 0 : 1;
                 s->health -= dmg;
                 s->hurt_cd = 120;              /* 0x41A538: 0x78 ticks */
-                if (kb) {
-                    s->pl.vy = -FA_FIX(6);
-                    s->pl.on_ground = 0;
+                if (fa_beh_knockback_player(s->beh, hit_player)) {
+                    fa_player *hit = hit_player ? &s->pl2 : &s->pl;
+                    hit->vy = -FA_FIX(6);
+                    hit->on_ground = 0;
                 }
+                s->death_player = hit_player;
                 if (s->audio)
-                    fa_audio_event(s->audio, (s->pl.character & 1)
+                    fa_audio_event(s->audio, hit_player
                                    ? FA_SND_HIT_M : FA_SND_HIT_P);
                 printf("hit! health %d\n", s->health);
             }
@@ -1259,19 +1578,30 @@ static void s_sim(uint64_t tick, const void *input, void *user)
              * (attr & 0x80) deals 20 + 120 i-frames when not already in
              * i-frames, plays the character hit sound, and ALWAYS bounces
              * the kid up (vy = -20.0) so he cannot sit in it. */
-            if (!s->freemove && s->health > 0 &&
+            int hazard0 = !s->freemove &&
                 slice_hazard(&s->map, fa_player_px(&s->pl),
-                             fa_player_py(&s->pl))) {
+                             fa_player_py(&s->pl));
+            int hazard1 = s->coop && !s->freemove &&
+                slice_hazard(&s->map, fa_player_px(&s->pl2),
+                             fa_player_py(&s->pl2));
+            if ((hazard0 || hazard1) && s->health > 0) {
                 if (s->hurt_cd == 0) {
                     s->health -= 20;
                     s->hurt_cd = 120;
+                    s->death_player = hazard0 ? 0 : 1;
                     if (s->audio)
-                        fa_audio_event(s->audio, (s->pl.character & 1)
-                                       ? FA_SND_HIT_M : FA_SND_HIT_P);
+                        fa_audio_event(s->audio, hazard0
+                                       ? FA_SND_HIT_P : FA_SND_HIT_M);
                     printf("hazard! health %d\n", s->health);
                 }
-                s->pl.vy = -FA_FIX(20);        /* 0x431A20(0xFFFEC000) */
-                s->pl.on_ground = 0;
+                if (hazard0) {
+                    s->pl.vy = -FA_FIX(20);
+                    s->pl.on_ground = 0;
+                }
+                if (hazard1) {
+                    s->pl2.vy = -FA_FIX(20);
+                    s->pl2.on_ground = 0;
+                }
             }
             if (s->hurt_cd > 0) s->hurt_cd--;
 
@@ -1291,13 +1621,14 @@ static void s_sim(uint64_t tick, const void *input, void *user)
              * Handled by the fa_death branch at the top of the block from the
              * next tick. */
             if (s->health <= 0 && !fa_death_active(&s->death) && !s->freemove) {
-                int face = (s->pl.character & 1) ? 1 : -1;   /* 0x4E1020 sign */
+                fa_player *dead = s->death_player ? &s->pl2 : &s->pl;
+                int face = dead->character & 1 ? 1 : -1;   /* 0x4E1020 sign */
                 s->health = 0;
-                s->pl.vx = FA_FIX(18) * face;
-                s->pl.vy = -FA_FIX(6);
-                s->pl.on_ground = 0;
-                fa_death_begin(&s->death, s->pl.character & 1,
-                               s->pl.facing == FA_FACE_RIGHT ? 1 : -1);
+                dead->vx = FA_FIX(18) * face;
+                dead->vy = -FA_FIX(6);
+                dead->on_ground = 0;
+                fa_death_begin(&s->death, dead->character & 1,
+                               dead->facing == FA_FACE_RIGHT ? 1 : -1);
                 printf("run over in Welt%d%s (score %d) -> KO %d t, fade %d t, "
                        "then CLASSIFICA\n", s->world, s->in_end ? "E" : "",
                        s->score, FA_DEATH_HOLD_TICKS, FA_DEATH_FADE_TICKS);
@@ -1306,30 +1637,11 @@ static void s_sim(uint64_t tick, const void *input, void *user)
 
         fa_camera_follow(&s->cam, fa_player_px(&s->pl), fa_player_py(&s->pl));
         if (s->have_kids) {
-            int k = s->pl.character & 1;
-            fa_cs_pose pose = kid_pose(&s->pl);
-            /* Fettalatte's swap ends with a turn-back (150-159); the last
-             * swap_end_c1 ticks of the c1 swap show it (PL-104) */
-            if (pose == FA_CS_SWAP && (s->pl.character & 1) &&
-                s->pl.swap_timer <= s->pl.t.swap_end_c1)
-                pose = FA_CS_SWAP_END;
-            /* play the stand-up frames once when DOWN is released on the ground */
-            int crouch = (pose == FA_CS_CROUCH);
-            if (s->kid_was_crouch && !crouch && s->pl.on_ground)
-                s->kid_rise = 14;
-            s->kid_was_crouch = crouch;
-            if (s->kid_rise > 0) { s->kid_rise--; pose = FA_CS_CROUCH_RISE; }
-            /* the climb pose freezes while the player is not moving (PL-102) */
-            fa_cs_anim_set_period(&s->kid_anim[k],
-                (s->pl.state == FA_PST_CLIMB && !s->pl.climb_moving) ? 0 : 2);
-            /* the climb sheet is a front-on pose - pin it to one orientation so
-             * it never mirrors with input. The correct look is the mirror of
-             * the raw art (owner: Fettalatte must read white-left / red-right). */
-            int cface = s->pl.facing;
-            if (pose == FA_CS_CLIMB && s->kid_anim[k].sheet)
-                cface = -s->kid_anim[k].sheet->base_facing;
-            fa_cs_anim_set(&s->kid_anim[k], pose, cface);
-            fa_cs_anim_tick(&s->kid_anim[k]);
+            slice_update_kid_anim(s, &s->pl, s->pl.character & 1,
+                                  &s->kid_was_crouch, &s->kid_rise);
+            if (s->coop)
+                slice_update_kid_anim(s, &s->pl2, 1,
+                                      &s->kid_was_crouch2, &s->kid_rise2);
         }
         return;
     }
@@ -1349,21 +1661,15 @@ static void s_sim(uint64_t tick, const void *input, void *user)
  * is what lets the jungle spikes and the factory pipes pass in front of
  * the kid. Enemy projectiles, HUD and the death fade stay on top (their
  * exe passes run after the whole scene). */
-static void slice_plane_hook(void *ud, const fa_surface *dst,
-                             const fa_camera *cam, int plane)
+static void slice_draw_player(slice *s, const fa_surface *dst,
+                              const fa_camera *cam, const fa_player *p,
+                              int k, int blink)
 {
-    if (plane != 2) return;
-    slice *s = (slice *)ud;
-    if (!s->use_player) return;
-
-    int px = fa_player_px(&s->pl) - cam->x;
-    int py = fa_player_py(&s->pl) - cam->y;
-    int k = s->pl.character & 1;
+    int px = fa_player_px(p) - cam->x;
+    int py = fa_player_py(p) - cam->y;
     long drawn = -1;
     /* RRR-53: blink the kid through the i-frame window - hidden on
      * alternate ~7 px of the countdown. Not while dying. */
-    int blink = s->hurt_cd > 0 && !fa_death_active(&s->death) &&
-                ((s->hurt_cd >> 2) & 1);
     if (s->have_kids && !blink)
         drawn = fa_cs_anim_draw(&s->kid_anim[k], dst, px, py, NULL);
     else if (blink)
@@ -1372,20 +1678,38 @@ static void slice_plane_hook(void *ud, const fa_surface *dst,
         fa_rect body = { px - 8, py - 40, 16, 40 };
         fa_fill(dst, &body, NULL, fa_rgb565(240, 210, 60));
     }
+}
+
+static void slice_plane_hook(void *ud, const fa_surface *dst,
+                             const fa_camera *cam, int plane)
+{
+    if (plane != 2) return;
+    slice *s = (slice *)ud;
+    if (!s->use_player) return;
+
+    int blink = s->hurt_cd > 0 && !fa_death_active(&s->death) &&
+                ((s->hurt_cd >> 2) & 1);
+    slice_draw_player(s, dst, cam, &s->pl, s->pl.character & 1, blink);
+    if (s->coop)
+        slice_draw_player(s, dst, cam, &s->pl2, 1, blink);
+
     /* thrown snowball = PINGUIN.W01 frame 261 (0x105, Schneeball); the "dirty"
      * black ball after collect_dirtyballs is frame 232 (0xE8) - the exe's
      * snowball-slot type doubles as the sprite frame (spawn 0x41A268). */
     const fa_w01 *proj_w = s->have_kids ? &s->kid_sheet[0].w01 : NULL;
     int proj_f = s->dirty_shot ? 232 : 261;
-    for (int i = 0; i < FA_MAX_SNOWBALLS; i++) {
-        if (!s->pl.snow[i].alive) continue;
-        int sx = (int)(s->pl.snow[i].x >> 16) - cam->x;
-        int sy = (int)(s->pl.snow[i].y >> 16) - cam->y;
-        if (!blit_w01_centered(dst, proj_w, proj_f, sx, sy)) {
-            fa_rect b = { sx - 3, sy - 3, 6, 6 };
-            fa_fill(dst, &b, NULL,
-                    s->dirty_shot ? fa_rgb565(40, 40, 48)
-                                  : fa_rgb565(255, 255, 255));
+    const fa_player *players[2] = { &s->pl, &s->pl2 };
+    for (int j = 0; j < (s->coop ? 2 : 1); j++) {
+        for (int i = 0; i < FA_MAX_SNOWBALLS; i++) {
+            if (!players[j]->snow[i].alive) continue;
+            int sx = (int)(players[j]->snow[i].x >> 16) - cam->x;
+            int sy = (int)(players[j]->snow[i].y >> 16) - cam->y;
+            if (!blit_w01_centered(dst, proj_w, proj_f, sx, sy)) {
+                fa_rect b = { sx - 3, sy - 3, 6, 6 };
+                fa_fill(dst, &b, NULL,
+                        s->dirty_shot ? fa_rgb565(40, 40, 48)
+                                      : fa_rgb565(255, 255, 255));
+            }
         }
     }
 }
@@ -1454,7 +1778,8 @@ static void s_render(double alpha, uint16_t *fb, int w, int h, size_t pitch,
             int boss_hp = (s->in_end && s->beh) ? fa_beh_boss_hp(s->beh) : -1;
             if (s->hud)
                 fa_hud_render(s->hud, &dst, s->score, s->health, s->ammo,
-                              s->dirty_shot, s->items, s->pl.character,
+                              s->dirty_shot, s->items,
+                              s->coop ? 0 : s->pl.character,
                               boss_hp, s->world - 1);
 
             /* RRR-53: the end-of-run fade (exe 0x45ED42 = 0x10, step 1). No
@@ -1644,8 +1969,10 @@ int main(int argc, char **argv)
                    "ENDTITLES), then the menu\n"
                    "  a world with tut.ini byte 0 loads its tutorial (WeltNt) "
                    "automatically; --tut forces it\n"
-                   "  in a level: P toggles free-move (no-clip fly; hold A to "
-                   "dash); I skips to this world's boss arena\n"
+                    "  in a level: P toggles free-move (no-clip fly; hold A to "
+                    "dash); I skips to this world's boss arena\n"
+                    "  local co-op: press ENTER or controller START; P2 uses "
+                    "I/J/K/L + U/O + T, or the joining controller + LB\n"
                    "  audio: with GData the real mixer plays music + voice "
                    "(--mute off, --vol 0..255); no GData -> a 440 Hz tone "
                    "(--tone keeps it, --silent off)\n"
@@ -1673,6 +2000,9 @@ int main(int argc, char **argv)
     s.vol = vol;
     s.hover = -1;
     s.menu_focus = -1;
+    s.p1_controller = -1;
+    s.p2_controller = -1;
+    s.keyboard_roles_swapped = 0;
     s.ov_gravity = ov_g; s.ov_jumpvel = ov_j; s.ov_jumpvel2 = ov_j2;
     s.ov_runspeed = ov_r; s.ov_airaccel = ov_a;
     s.ov_bboxw = ov_bw; s.ov_bboxh = ov_bh;

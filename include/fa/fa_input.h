@@ -9,8 +9,9 @@
  * derives "just pressed" by diffing the previous tick. This module keeps that
  * model exactly: a 256-byte current array and a 256-byte previous array,
  * indexed by DIK scancode, with the previous array taken once per frame by
- * fa_input_begin_frame(). SDL_GameController state is kept alongside it as a
- * logical button/axis model, ready for the host to assign gameplay actions.
+ * fa_input_begin_frame(). Up to two SDL_GameController states are kept
+ * alongside it as logical button/axis models, ready for the host to assign
+ * gameplay actions.
  *
  * The menu / front-end uses a pointer and button-DOWN edges only. The
  * original reads Win32 messages 512/513/515/516/256 and never handles
@@ -47,6 +48,12 @@ struct fa_vfs;
 #define FA_DIK_S        31
 #define FA_DIK_D        32
 #define FA_DIK_F        33
+#define FA_DIK_T        20
+#define FA_DIK_U        22
+#define FA_DIK_O        24
+#define FA_DIK_J        36
+#define FA_DIK_K        37
+#define FA_DIK_L        38
 #define FA_DIK_P        25
 #define FA_DIK_I        23
 #define FA_DIK_SPACE    57
@@ -97,6 +104,8 @@ typedef enum {
     FA_PAD_AXIS_COUNT
 } fa_pad_axis;
 
+#define FA_INPUT_MAX_PADS 2
+
 /* Option.ini lines 9-22: 8 controller slots + 4 aux u16 + SFX vol + music
  * vol (RRR-23). Preserved verbatim across a save. */
 #define FA_OPT_TAIL_LINES  14
@@ -105,10 +114,10 @@ typedef struct fa_input {
     unsigned char keys[256];
     unsigned char keys_prev[256];
 
-    unsigned char pad_buttons[FA_PAD_BUTTON_COUNT];
-    unsigned char pad_buttons_prev[FA_PAD_BUTTON_COUNT];
-    float         pad_axes[FA_PAD_AXIS_COUNT]; /* normalized -1..1 */
-    unsigned char pad_connected;
+    unsigned char pad_buttons[FA_INPUT_MAX_PADS][FA_PAD_BUTTON_COUNT];
+    unsigned char pad_buttons_prev[FA_INPUT_MAX_PADS][FA_PAD_BUTTON_COUNT];
+    float         pad_axes[FA_INPUT_MAX_PADS][FA_PAD_AXIS_COUNT]; /* -1..1 */
+    unsigned char pad_connected[FA_INPUT_MAX_PADS];
 
     int           ptr_x, ptr_y;
     unsigned char btn[3];
@@ -143,8 +152,9 @@ void fa_input_set_key(fa_input *in, int dik, int down);
 void fa_input_set_pointer(fa_input *in, int x, int y);
 void fa_input_set_button(fa_input *in, int btn, int down);   /* btn 0..2 */
 
-/* Feed the SDL-agnostic GameController state. Button and edge queries are
- * useful to menus; gameplay mappings remain an explicit policy in the host. */
+/* Feed the SDL-agnostic GameController state for pad slot 0. Button and edge
+ * queries are useful to menus; gameplay mappings remain an explicit policy in
+ * the host. */
 void  fa_input_set_pad_connected(fa_input *in, int connected);
 void  fa_input_set_pad_button(fa_input *in, fa_pad_button btn, int down);
 void  fa_input_set_pad_axis(fa_input *in, fa_pad_axis axis, float value);
@@ -153,6 +163,19 @@ int   fa_input_pad_button_down(const fa_input *in, fa_pad_button btn);
 int   fa_input_pad_button_pressed(const fa_input *in, fa_pad_button btn);
 float fa_input_pad_axis(const fa_input *in, fa_pad_axis axis);
 int   fa_input_pointer_moved(const fa_input *in);
+
+/* The same feed/query API for an explicit local-controller slot (0..1). */
+void  fa_input_set_pad_connected_slot(fa_input *in, int slot, int connected);
+void  fa_input_set_pad_button_slot(fa_input *in, int slot,
+                                    fa_pad_button btn, int down);
+void  fa_input_set_pad_axis_slot(fa_input *in, int slot,
+                                  fa_pad_axis axis, float value);
+int   fa_input_pad_connected_slot(const fa_input *in, int slot);
+int   fa_input_pad_button_down_slot(const fa_input *in, int slot,
+                                    fa_pad_button btn);
+int   fa_input_pad_button_pressed_slot(const fa_input *in, int slot,
+                                       fa_pad_button btn);
+float fa_input_pad_axis_slot(const fa_input *in, int slot, fa_pad_axis axis);
 
 /* --- console fallback (RRR-40 AC2) --------------------------------- */
 

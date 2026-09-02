@@ -92,51 +92,98 @@ void fa_input_set_button(fa_input *in, int btn, int down)
 
 void fa_input_set_pad_connected(fa_input *in, int connected)
 {
-    if (connected) {
-        in->pad_connected = 1u;
-        return;
-    }
-
-    in->pad_connected = 0u;
-    memset(in->pad_buttons, 0, sizeof in->pad_buttons);
-    memset(in->pad_axes, 0, sizeof in->pad_axes);
+    fa_input_set_pad_connected_slot(in, 0, connected);
 }
 
 void fa_input_set_pad_button(fa_input *in, fa_pad_button btn, int down)
 {
-    if (btn < 0 || btn >= FA_PAD_BUTTON_COUNT) return;
-    in->pad_buttons[btn] = down ? 1u : 0u;
+    fa_input_set_pad_button_slot(in, 0, btn, down);
 }
 
 void fa_input_set_pad_axis(fa_input *in, fa_pad_axis axis, float value)
 {
-    if (axis < 0 || axis >= FA_PAD_AXIS_COUNT) return;
-    if (value < -1.0f) value = -1.0f;
-    if (value >  1.0f) value =  1.0f;
-    in->pad_axes[axis] = value;
+    fa_input_set_pad_axis_slot(in, 0, axis, value);
 }
 
 int fa_input_pad_connected(const fa_input *in)
 {
-    return in->pad_connected != 0;
+    return fa_input_pad_connected_slot(in, 0);
 }
 
 int fa_input_pad_button_down(const fa_input *in, fa_pad_button btn)
 {
-    if (btn < 0 || btn >= FA_PAD_BUTTON_COUNT) return 0;
-    return in->pad_buttons[btn] != 0;
+    return fa_input_pad_button_down_slot(in, 0, btn);
 }
 
 int fa_input_pad_button_pressed(const fa_input *in, fa_pad_button btn)
 {
-    if (btn < 0 || btn >= FA_PAD_BUTTON_COUNT) return 0;
-    return in->pad_buttons[btn] && !in->pad_buttons_prev[btn];
+    return fa_input_pad_button_pressed_slot(in, 0, btn);
 }
 
 float fa_input_pad_axis(const fa_input *in, fa_pad_axis axis)
 {
-    if (axis < 0 || axis >= FA_PAD_AXIS_COUNT) return 0.0f;
-    return in->pad_axes[axis];
+    return fa_input_pad_axis_slot(in, 0, axis);
+}
+
+void fa_input_set_pad_connected_slot(fa_input *in, int slot, int connected)
+{
+    if (!in || slot < 0 || slot >= FA_INPUT_MAX_PADS) return;
+    if (connected) {
+        in->pad_connected[slot] = 1u;
+        return;
+    }
+
+    in->pad_connected[slot] = 0u;
+    memset(in->pad_buttons[slot], 0, sizeof in->pad_buttons[slot]);
+    memset(in->pad_axes[slot], 0, sizeof in->pad_axes[slot]);
+}
+
+void fa_input_set_pad_button_slot(fa_input *in, int slot,
+                                   fa_pad_button btn, int down)
+{
+    if (!in || slot < 0 || slot >= FA_INPUT_MAX_PADS ||
+        btn < 0 || btn >= FA_PAD_BUTTON_COUNT) return;
+    in->pad_buttons[slot][btn] = down ? 1u : 0u;
+}
+
+void fa_input_set_pad_axis_slot(fa_input *in, int slot,
+                                 fa_pad_axis axis, float value)
+{
+    if (!in || slot < 0 || slot >= FA_INPUT_MAX_PADS ||
+        axis < 0 || axis >= FA_PAD_AXIS_COUNT) return;
+    if (value < -1.0f) value = -1.0f;
+    if (value >  1.0f) value = 1.0f;
+    in->pad_axes[slot][axis] = value;
+}
+
+int fa_input_pad_connected_slot(const fa_input *in, int slot)
+{
+    return in && slot >= 0 && slot < FA_INPUT_MAX_PADS &&
+           in->pad_connected[slot] != 0;
+}
+
+int fa_input_pad_button_down_slot(const fa_input *in, int slot,
+                                  fa_pad_button btn)
+{
+    if (!in || slot < 0 || slot >= FA_INPUT_MAX_PADS ||
+        btn < 0 || btn >= FA_PAD_BUTTON_COUNT) return 0;
+    return in->pad_buttons[slot][btn] != 0;
+}
+
+int fa_input_pad_button_pressed_slot(const fa_input *in, int slot,
+                                     fa_pad_button btn)
+{
+    if (!in || slot < 0 || slot >= FA_INPUT_MAX_PADS ||
+        btn < 0 || btn >= FA_PAD_BUTTON_COUNT) return 0;
+    return in->pad_buttons[slot][btn] &&
+           !in->pad_buttons_prev[slot][btn];
+}
+
+float fa_input_pad_axis_slot(const fa_input *in, int slot, fa_pad_axis axis)
+{
+    if (!in || slot < 0 || slot >= FA_INPUT_MAX_PADS ||
+        axis < 0 || axis >= FA_PAD_AXIS_COUNT) return 0.0f;
+    return in->pad_axes[slot][axis];
 }
 
 int fa_input_pointer_moved(const fa_input *in)

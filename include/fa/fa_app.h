@@ -31,6 +31,16 @@ extern "C" {
 
 struct fa_platform_cfg;
 
+#define FA_APP_MAX_PADS 2
+
+typedef struct fa_frame_pad {
+    uint32_t down;        /* bit (1u << fa_pad_button) per held button */
+    uint32_t pressed;     /* controller button down-edges                 */
+    float    lx, ly;      /* normalized left stick axes, -1..1            */
+    float    rx, ry;      /* normalized right stick axes, -1..1           */
+    uint8_t  connected;
+} fa_frame_pad;
+
 /*
  * The per-frame input handed to every sim tick. `actions` is first, so old
  * consumers that do `*(const uint32_t *)input` still read the action mask.
@@ -39,6 +49,7 @@ struct fa_platform_cfg;
  */
 typedef struct fa_frame_input {
     uint32_t actions;        /* bit (1u << fa_action) per held action */
+    uint32_t keyboard_actions; /* legacy bindings, excluding controller state */
     uint32_t actions_pressed;/* action down-edges, carried until a sim tick */
     uint32_t pad_down;       /* bit (1u << fa_pad_button) per held button */
     uint32_t pad_pressed;    /* controller button down-edges */
@@ -59,6 +70,15 @@ typedef struct fa_frame_input {
     char     text[8];
     uint8_t  text_n;
     uint8_t  edit_pressed;   /* FA_EDIT_* bits */
+
+    /* Local co-op controller slots. pads[0] mirrors the legacy pad_* fields
+     * above; pads[1] is the second SDL controller. */
+    fa_frame_pad pads[FA_APP_MAX_PADS];
+
+    /* Optional second-keyboard layout used when co-op is enabled without a
+     * second controller: I/J/K/L move, U jumps, O throws, T teleports. */
+    uint32_t keyboard2_actions;
+    uint8_t  keyboard2_teleport_pressed;
 } fa_frame_input;
 
 /* Debug-key edge bits in fa_frame_input.dbg_pressed (dev tooling only). */

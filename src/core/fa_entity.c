@@ -16,6 +16,8 @@
 #if defined(_WIN32)
 #  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
+#else
+#  include <dirent.h>
 #endif
 
 /* --- little-endian record reads ------------------------------------- */
@@ -98,9 +100,13 @@ static int list_dir(const char *dir, dir_cb fn, void *user)
     FindClose(h);
     return 0;
 #else
-    /* POSIX dirent - guarded so the file still builds where it is absent */
-    (void)dir; (void)fn; (void)user;
-    return -1;
+    DIR *d = opendir(dir);
+    if (!d) return -1;
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL)
+        fn(ent->d_name, user);
+    closedir(d);
+    return 0;
 #endif
 }
 

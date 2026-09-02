@@ -51,8 +51,8 @@ typedef struct {
     SDL_Texture    *tex;
     int             tex_w, tex_h;
     SDL_AudioDeviceID audio;
-    SDL_GameController *pad;
-    SDL_JoystickID     pad_id;
+    SDL_GameController *pads[FA_INPUT_MAX_PADS];
+    SDL_JoystickID     pad_ids[FA_INPUT_MAX_PADS];
     int             controller_init;
     int             audio_ch;
     int             audio_rate;
@@ -94,16 +94,18 @@ static int pad_axis_to_fa(SDL_GameControllerAxis a)
     }
 }
 
-static void sdl_close_controller(sdl_state *s)
+static void sdl_close_controller(sdl_state *s, int slot)
 {
-    if (s->pad) SDL_GameControllerClose(s->pad);
-    s->pad = NULL;
-    s->pad_id = (SDL_JoystickID)-1;
+    if (slot < 0 || slot >= FA_INPUT_MAX_PADS) return;
+    if (s->pads[slot]) SDL_GameControllerClose(s->pads[slot]);
+    s->pads[slot] = NULL;
+    s->pad_ids[slot] = (SDL_JoystickID)-1;
 }
 
-static int sdl_open_controller(sdl_state *s, int device_index)
+static int sdl_open_controller(sdl_state *s, int device_index, int slot)
 {
-    if (device_index < 0 || !SDL_IsGameController(device_index)) return -1;
+    if (slot < 0 || slot >= FA_INPUT_MAX_PADS ||
+        device_index < 0 || !SDL_IsGameController(device_index)) return -1;
 
     SDL_GameController *pad = SDL_GameControllerOpen(device_index);
     if (!pad) {
@@ -112,9 +114,23 @@ static int sdl_open_controller(sdl_state *s, int device_index)
         return -1;
     }
 
-    s->pad = pad;
-    s->pad_id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad));
-    fprintf(stderr, "controller: %s\n",
+    SDL_JoystickID id =
+        SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(pad));
+    /* A controller that was already present during startup can still produce
+     * a queued DEVICEADDED event on some SDL/platform combinations.  Do not
+     * let that event open the same physical joystick in the other local-pad
+     * slot: co-op uses the slot identity to split Penguin and Milchschnitte,
+     * so a duplicate would make one controller drive both players. */
+    for (int i = 0; i < FA_INPUT_MAX_PADS; i++) {
+        if (i != slot && s->pads[i] && s->pad_ids[i] == id) {
+            SDL_GameControllerClose(pad);
+            return -1;
+        }
+    }
+
+    s->pads[slot] = pad;
+    s->pad_ids[slot] = id;
+    fprintf(stderr, "controller %d: %s\n", slot + 1,
             SDL_GameControllerName(pad) ? SDL_GameControllerName(pad) : "?");
     return 0;
 }
@@ -122,7 +138,10 @@ static int sdl_open_controller(sdl_state *s, int device_index)
 static void sdl_open_first_controller(sdl_state *s)
 {
     for (int i = 0; i < SDL_NumJoysticks(); i++) {
-        if (sdl_open_controller(s, i) == 0) return;
+        for (int slot = 0; slot < FA_INPUT_MAX_PADS; slot++) {
+            if (s->pads[slot]) continue;
+            if (sdl_open_controller(s, i, slot) == 0) break;
+        }
     }
 }
 
@@ -149,32 +168,33 @@ static void sdl_sync_controller(sdl_state *s, struct fa_input *in)
     };
 
     if (!in) return;
-    if (!s->pad || !SDL_GameControllerGetAttached(s->pad)) {
-        if (s->pad) sdl_close_controller(s);
-        fa_input_set_pad_connected(in, 0);
-        return;
+    for (int slot = 0; slot < FA_INPUT_MAX_PADS; slot++) {
+        SDL_GameController *pad = s->pads[slot];
+        if (!pad || !SDL_GameControllerGetAttached(pad)) {
+            if (pad) sdl_close_controller(s, slot);
+            fa_input_set_pad_connected_slot(in, slot, 0);
+            continue;
+        }
+
+        fa_input_set_pad_connected_slot(in, slot, 1);
+        for (unsigned i = 0; i < sizeof buttons / sizeof buttons[0]; i++) {
+            int b = pad_button_to_fa(buttons[i]);
+            if (b >= 0)
+                fa_input_set_pad_button_slot(in, slot, (fa_pad_button)b,
+                    SDL_GameControllerGetButton(pad, buttons[i]));
+        }
+        for (unsigned i = 0; i < sizeof axes / sizeof axes[0]; i++) {
+            int a = pad_axis_to_fa(axes[i]);
+            if (a >= 0)
+                fa_input_set_pad_axis_slot(in, slot, (fa_pad_axis)a,
+                    axis_normalize(SDL_GameControllerGetAxis(pad, axes[i])));
+        }
     }
 
-    fa_input_set_pad_connected(in, 1);
-    for (unsigned i = 0; i < sizeof buttons / sizeof buttons[0]; i++) {
-        int b = pad_button_to_fa(buttons[i]);
-        if (b >= 0)
-            fa_input_set_pad_button(in, (fa_pad_button)b,
-                                    SDL_GameControllerGetButton(s->pad, buttons[i]));
-    }
-    for (unsigned i = 0; i < sizeof axes / sizeof axes[0]; i++) {
-        int a = pad_axis_to_fa(axes[i]);
-        if (a >= 0)
-            fa_input_set_pad_axis(in, (fa_pad_axis)a,
-                                  axis_normalize(SDL_GameControllerGetAxis(s->pad,
-                                                                            axes[i])));
-    }
-
-    /* The left stick can act as the existing virtual menu pointer. The
-     * pointer is harmless during gameplay and remains useful to future UI. */
+    /* Only pad 0 owns the menu pointer. Gameplay reads both slots directly. */
     fa_input_stick(in,
-                   fa_input_pad_axis(in, FA_PAD_AXIS_LEFT_X),
-                   fa_input_pad_axis(in, FA_PAD_AXIS_LEFT_Y));
+                   fa_input_pad_axis_slot(in, 0, FA_PAD_AXIS_LEFT_X),
+                   fa_input_pad_axis_slot(in, 0, FA_PAD_AXIS_LEFT_Y));
 }
 
 /* SDL scancode -> DIK. The keys the port binds (RRR-40), the common gameplay
@@ -268,12 +288,17 @@ static int sdl_pump(fa_platform *p, struct fa_input *in)
             break;
         }
         case SDL_CONTROLLERDEVICEADDED:
-            if (s->controller_init && !s->pad)
-                (void)sdl_open_controller(s, e.cdevice.which);
+            if (s->controller_init) {
+                for (int slot = 0; slot < FA_INPUT_MAX_PADS; slot++) {
+                    if (s->pads[slot]) continue;
+                    if (sdl_open_controller(s, e.cdevice.which, slot) == 0) break;
+                }
+            }
             break;
         case SDL_CONTROLLERDEVICEREMOVED:
-            if (s->pad && e.cdevice.which == s->pad_id)
-                sdl_close_controller(s);
+            for (int slot = 0; slot < FA_INPUT_MAX_PADS; slot++)
+                if (s->pads[slot] && e.cdevice.which == s->pad_ids[slot])
+                    sdl_close_controller(s, slot);
             break;
         default: break;
         }
@@ -353,7 +378,8 @@ static void sdl_shutdown(fa_platform *p)
 {
     sdl_state *s = (sdl_state *)p->impl;
     if (s) {
-        sdl_close_controller(s);
+        for (int slot = 0; slot < FA_INPUT_MAX_PADS; slot++)
+            sdl_close_controller(s, slot);
         if (s->audio) SDL_CloseAudioDevice(s->audio);
         if (s->tex)   SDL_DestroyTexture(s->tex);
         if (s->ren)   SDL_DestroyRenderer(s->ren);
@@ -390,7 +416,8 @@ int fa_backend_sdl2_create(fa_platform *p, const fa_platform_cfg *cfg)
     if (!s) { SDL_QuitSubSystem(SDL_INIT_VIDEO | SDL_INIT_EVENTS); return -1; }
     s->pf_freq = SDL_GetPerformanceFrequency();
     if (s->pf_freq == 0) s->pf_freq = 1;
-    s->pad_id = (SDL_JoystickID)-1;
+    for (int slot = 0; slot < FA_INPUT_MAX_PADS; slot++)
+        s->pad_ids[slot] = (SDL_JoystickID)-1;
     s->integer_scale = cfg ? cfg->integer_scale : 0;
 
     Uint32 wflags = SDL_WINDOW_RESIZABLE |
@@ -463,7 +490,8 @@ int fa_backend_sdl2_create(fa_platform *p, const fa_platform_cfg *cfg)
     return 0;
 
 fail:
-    sdl_close_controller(s);
+    for (int slot = 0; slot < FA_INPUT_MAX_PADS; slot++)
+        sdl_close_controller(s, slot);
     if (s->ren) SDL_DestroyRenderer(s->ren);
     if (s->win) SDL_DestroyWindow(s->win);
     free(s);

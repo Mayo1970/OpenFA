@@ -31,6 +31,14 @@ static uint32_t actions_of(const fa_input *in)
     return m;
 }
 
+static uint32_t keyboard_actions_of(const fa_input *in)
+{
+    uint32_t m = 0;
+    for (int a = 0; a < FA_ACT_COUNT; a++)
+        if (fa_input_key_down(in, in->binds[a])) m |= (1u << a);
+    return m;
+}
+
 static uint32_t action_edges_of(const fa_input *in)
 {
     uint32_t m = 0;
@@ -39,15 +47,36 @@ static uint32_t action_edges_of(const fa_input *in)
     return m;
 }
 
+static uint32_t pad_buttons_of_slot(const fa_input *in, int slot, int pressed);
+
 static uint32_t pad_buttons_of(const fa_input *in, int pressed)
+{
+    return pad_buttons_of_slot(in, 0, pressed);
+}
+
+static uint32_t pad_buttons_of_slot(const fa_input *in, int slot, int pressed)
 {
     uint32_t m = 0;
     for (int b = 0; b < FA_PAD_BUTTON_COUNT; b++) {
         int down = pressed
-                 ? fa_input_pad_button_pressed(in, (fa_pad_button)b)
-                 : fa_input_pad_button_down(in, (fa_pad_button)b);
+                 ? fa_input_pad_button_pressed_slot(in, slot, (fa_pad_button)b)
+                 : fa_input_pad_button_down_slot(in, slot, (fa_pad_button)b);
         if (down) m |= (1u << b);
     }
+    return m;
+}
+
+/* A second keyboard layout is deliberately separate from the original
+ * arrows + A/S/F/D bindings used by the Penguin. */
+static uint32_t keyboard2_actions_of(const fa_input *in)
+{
+    uint32_t m = 0;
+    if (fa_input_key_down(in, FA_DIK_J)) m |= 1u << FA_ACT_LEFT;
+    if (fa_input_key_down(in, FA_DIK_L)) m |= 1u << FA_ACT_RIGHT;
+    if (fa_input_key_down(in, FA_DIK_I)) m |= 1u << FA_ACT_UP;
+    if (fa_input_key_down(in, FA_DIK_K)) m |= 1u << FA_ACT_DOWN;
+    if (fa_input_key_down(in, FA_DIK_U)) m |= 1u << FA_ACT_JUMP;
+    if (fa_input_key_down(in, FA_DIK_O)) m |= 1u << FA_ACT_FIRE;
     return m;
 }
 
@@ -86,8 +115,9 @@ int fa_app_run(const fa_platform_cfg *cfg, const fa_app_cbs *cbs,
     int quit = 0;
     uint32_t carry_actions_pressed = 0;
     uint32_t carry_pressed = 0;   /* button down-edges held until a tick sees them */
-    uint32_t carry_pad_pressed = 0;
+    uint32_t carry_pad_pressed[FA_APP_MAX_PADS] = { 0, 0 };
     uint32_t carry_dbg = 0;       /* debug-key down-edges, same hold rule */
+    uint8_t  carry_keyboard2_teleport = 0;
     char     carry_text[8];       /* typed chars, same hold rule */
     uint8_t  carry_text_n = 0;
     uint8_t  carry_edit = 0;      /* backspace/enter/esc edges, same hold rule */
@@ -99,16 +129,32 @@ int fa_app_run(const fa_platform_cfg *cfg, const fa_app_cbs *cbs,
         quit = pf.vt->pump(&pf, &in);
 
         actx.fi.actions = actions_of(&in);
+        actx.fi.keyboard_actions = keyboard_actions_of(&in);
         carry_actions_pressed |= action_edges_of(&in);
         actx.fi.actions_pressed = carry_actions_pressed;
         actx.fi.pad_down = pad_buttons_of(&in, 0);
-        carry_pad_pressed |= pad_buttons_of(&in, 1);
-        actx.fi.pad_pressed = carry_pad_pressed;
+        carry_pad_pressed[0] |= pad_buttons_of(&in, 1);
+        actx.fi.pad_pressed = carry_pad_pressed[0];
         actx.fi.pad_lx = fa_input_pad_axis(&in, FA_PAD_AXIS_LEFT_X);
         actx.fi.pad_ly = fa_input_pad_axis(&in, FA_PAD_AXIS_LEFT_Y);
         actx.fi.pad_rx = fa_input_pad_axis(&in, FA_PAD_AXIS_RIGHT_X);
         actx.fi.pad_ry = fa_input_pad_axis(&in, FA_PAD_AXIS_RIGHT_Y);
         actx.fi.pad_connected = (uint8_t)fa_input_pad_connected(&in);
+        for (int pad = 0; pad < FA_APP_MAX_PADS; pad++) {
+            actx.fi.pads[pad].down = pad_buttons_of_slot(&in, pad, 0);
+            carry_pad_pressed[pad] |= pad_buttons_of_slot(&in, pad, 1);
+            actx.fi.pads[pad].pressed = carry_pad_pressed[pad];
+            actx.fi.pads[pad].lx = fa_input_pad_axis_slot(&in, pad, FA_PAD_AXIS_LEFT_X);
+            actx.fi.pads[pad].ly = fa_input_pad_axis_slot(&in, pad, FA_PAD_AXIS_LEFT_Y);
+            actx.fi.pads[pad].rx = fa_input_pad_axis_slot(&in, pad, FA_PAD_AXIS_RIGHT_X);
+            actx.fi.pads[pad].ry = fa_input_pad_axis_slot(&in, pad, FA_PAD_AXIS_RIGHT_Y);
+            actx.fi.pads[pad].connected =
+                (uint8_t)fa_input_pad_connected_slot(&in, pad);
+        }
+        actx.fi.keyboard2_actions = keyboard2_actions_of(&in);
+        if (fa_input_key_pressed(&in, FA_DIK_T))
+            carry_keyboard2_teleport = 1;
+        actx.fi.keyboard2_teleport_pressed = carry_keyboard2_teleport;
         fa_input_pointer(&in, &actx.fi.ptr_x, &actx.fi.ptr_y);
         actx.fi.ptr_moved = (uint8_t)fa_input_pointer_moved(&in);
         actx.fi.btn_down = 0;
@@ -143,8 +189,10 @@ int fa_app_run(const fa_platform_cfg *cfg, const fa_app_cbs *cbs,
         if (lp.last_steps > 0) {   /* a tick consumed the edges */
             carry_actions_pressed = 0;
             carry_pressed = 0;
-            carry_pad_pressed = 0;
+            for (int pad = 0; pad < FA_APP_MAX_PADS; pad++)
+                carry_pad_pressed[pad] = 0;
             carry_dbg = 0;
+            carry_keyboard2_teleport = 0;
             carry_text_n = 0; carry_edit = 0;
         }
 
