@@ -37,21 +37,28 @@ struct fa_map;
 struct fa_entity_store;
 
 typedef struct fa_camera {
-    int x, y;              /* top-left world pixel of the viewport */
+    int x, y;              /* scroll: top-left world pixel of the viewport */
     int vw, vh;            /* viewport size (800x600)              */
     int world_w, world_h;  /* level extent in pixels, for the clamp */
 
-    /* RRR-45 follow behaviour. The target may drift inside a box of half
-     * extents (dz_x, dz_y) around the focus point without moving the
-     * camera; the focus point sits bias_y pixels ABOVE the viewport centre
-     * (so a negative bias_y - the default - puts the focus below centre and
-     * the player in the lower third, level above, matching the oracle).
-     * max_step caps the camera move per follow call (0 = snap, no cap).
-     * fa_camera_init sets the defaults; they are owner-tunable, like the
-     * physics constants - no exe symbol pins the camera (PL-111). */
-    int dz_x, dz_y;
-    int bias_y;
-    int max_step;
+    /* RRR-45 follow behaviour, re-derived from the exe (follow routine
+     * 0x4349c0; the box it reads is stored by 0x411fd6 = {130,280,670,480}
+     * for an 800x600 screen). It is NOT a symmetric deadzone:
+     *  - X: the player is pinned to screen column `rail_l` while facing
+     *    right, or `rail_r` while facing left. The camera slews at most
+     *    `step_x` px per follow call, so a turn-around pans the view
+     *    across to the other rail.
+     *  - Y: a push band [band_t, band_b] in screen space. The camera
+     *    moves only when the player leaves the band, by the full
+     *    overshoot (no per-call cap on Y).
+     * Defaults: rail_l 130, rail_r vw-130, band 280..480, step_x 10. */
+    int rail_l, rail_r;
+    int band_t, band_b;
+    int step_x;
+
+    /* Boss arenas fix the camera (exe follow gate ds:0x4e1018). When set,
+     * fa_camera_follow is a no-op. fa_camera_boss / fa_camera_init own it. */
+    int locked;
 } fa_camera;
 
 void fa_camera_init(fa_camera *c, int vw, int vh, int world_w, int world_h);
@@ -63,10 +70,20 @@ void fa_camera_move(fa_camera *c, int dx, int dy);
 /* Put (wx,wy) at the viewport centre, then clamp. */
 void fa_camera_center_on(fa_camera *c, int wx, int wy);
 
-/* RRR-45: follow a world target. The camera moves only by the amount the
- * target has left the deadzone box around the (bias-shifted) focus point,
- * capped at max_step per call, then clamps to the world bounds. */
-void fa_camera_follow(fa_camera *c, int target_x, int target_y);
+/* Point the camera at a fresh spawn (exe 0x4119aa -> 0x434650): scroll =
+ * (spawn_x - 100, spawn_y - 400), then clamp. */
+void fa_camera_intro(fa_camera *c, int spawn_x, int spawn_y);
+
+/* Boss-arena camera (`world` 1..4). The exe fixes the scroll (intro-cam
+ * table 0x412880) and, for worlds 1/2/4, disables the follow (lock switch
+ * 0x4128d0); world 3's arena keeps following. Sets `locked` accordingly. */
+void fa_camera_boss(fa_camera *c, int world);
+
+/* RRR-45: per-frame follow (exe 0x4349c0). `facing` is 0 (player faces
+ * right) or 1 (faces left); any other value leaves X unchanged this call.
+ * X slews toward the facing rail at most step_x px; Y snaps the player
+ * back inside the push band; then the result clamps to the world bounds. */
+void fa_camera_follow(fa_camera *c, int target_x, int target_y, int facing);
 
 /* --- tile atlas ---------------------------------------------------- */
 

@@ -534,7 +534,8 @@ static int patrol_hi(const fa_entity_rec *e)
  */
 static int attack_gate(fa_beh *b, fa_entity_rec *e, const edesc *d)
 {
-    if (e->bs[BS_COOL] != 0) return 0;
+    /* kleiner_roboter state 1 has no rec[0x74] cooldown test (0x413686). */
+    if (e->obj_nr != 11 && e->bs[BS_COOL] != 0) return 0;
     if ((e->raw[0x2a] & 1) != 0) return 0;
 
     if (d->kind == K_DIVE) {
@@ -551,6 +552,10 @@ static int attack_gate(fa_beh *b, fa_entity_rec *e, const edesc *d)
     if (!side) return 0;
     if ((hdx < 0 ? -hdx : hdx) >= d->rng) return 0;
     if (b->py <= e->y + d->ylo || b->py >= e->y + d->yhi) return 0;
+    if (e->obj_nr == 11) {
+        int lo = patrol_lo(e), hi = patrol_hi(e);
+        if (b->px < lo || b->px >= hi) return 0;
+    }
     return 1;
 }
 
@@ -985,7 +990,8 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
         e->bs[BS_INIT] = 1;
         e->bs[BS_FX] = (int32_t)e->x << 16;
         e->bs[BS_FY] = (int32_t)e->y << 16;
-        e->bs[BS_VX] = -(int32_t)d->vx << 16;   /* vx = -speed (faces left) */
+        e->bs[BS_VX] = (e->obj_nr == 11 ? 1 : -1) *
+                       ((int32_t)d->vx << 16);   /* ObjNr 11 exe vx = +3 */
         e->bs[BS_VY] = 0;
         /* the exe inits rec[+0x78] = rec[+0x74] = 0 (kong 0x413D24, parrot
          * 0x416056): state 1's timer hits 0 on the first tick, so the enemy
@@ -1187,6 +1193,7 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
                     if (brand(b, 100) < 50) {            /* -> drink / refuel */
                         e->bs[BS_LS] = 360;
                         e->bs[BS_AF] = 0;
+                        e->bs[BS_KT] = 0;                 /* slurp countdown  */
                         e->anim_extra_delay = 3;
                         pd_range(e, 0, 10, 0);            /* OBFL             */
                     } else {                            /* -> shoot          */
@@ -1201,15 +1208,26 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
                 touch_player(b, bx0,by0,bx1,by1);
                 return 0;
 
-            case 360:                              /* OBFL ping-pong: drink  */
-                if (e->frame >= 10)      e->anim_mode = 2;  /* -> reverse    */
-                else if (e->frame <= 0)  e->anim_mode = 0;  /* -> forward    */
-                if (e->anim_mode == 0 && e->frame >= 7 && !e->bs[BS_AF]) {
+            case 360: {                            /* OBFL ping-pong: drink  */
+                /* exe 0x40CDFC: the octopus is hittable (flag 1) for the whole
+                 * of state 1, which lasts the full W4SF01 slurp on ch9 - it
+                 * ping-pongs OBFL 0..10 the entire time, then winds the anim
+                 * back to 0 and shoots. The port had no ch9 hook, so it exited
+                 * after ONE 0..10..0 pass (~1.3 s vs the exe's ~3 s window).
+                 * bs[BS_KT] now counts the slurp out from frame 7. */
+                int winding = e->bs[BS_AF] && e->bs[BS_KT] == 0;
+                if (e->bs[BS_AF] && e->bs[BS_KT] > 0) e->bs[BS_KT]--;
+
+                if (winding || e->frame >= 10) e->anim_mode = 2;  /* reverse  */
+                else if (e->frame <= 0)        e->anim_mode = 0;  /* forward  */
+
+                if (!e->bs[BS_AF] && e->anim_mode == 0 && e->frame >= 7) {
                     e->bs[BS_AF] = 1;                       /* slurp, once   */
+                    e->bs[BS_KT] = 124;                    /* W4SF01 @ 60 Hz */
                     if (b->h.sfx)
                         b->h.sfx(FA_BEH_SFX_BOSS_CHARGE, 18, b->h.user);
                 }
-                if (e->bs[BS_AF] && e->anim_mode == 0 && e->frame <= 0) {
+                if (winding && e->frame <= 0) {            /* wound down     */
                     e->bs[BS_LS]  = 350;                    /* -> shoot      */
                     e->bs[BS_RT]  = 50 + brand(b, 30);
                     e->bs[BS_KT]  = brand(b, 2);
@@ -1219,6 +1237,7 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
                 }
                 touch_player(b, bx0,by0,bx1,by1);
                 return 0;
+            }
 
             case 350: {                            /* OBSH: raise, then fire  */
                 if (snow_hit(b, bx0,by0,bx1,by1))
@@ -1814,25 +1833,62 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
 
     case K_CHARGE:
         if (e->bs[BS_LS] == 10) {          /* charging                     */
-            int spd = FX_6_0;
-            if (e->x - lo < 100 || hi - e->x < 100) spd = FX_3_0;
-            int dir = e->bs[BS_VX] < 0 ? -1 : 1;
-            e->bs[BS_FX] += dir * spd;
-            e->x = fx_round(e->bs[BS_FX]);
-            if (e->x <= lo || e->x >= hi) {
-                if (e->x < lo) { e->x = lo; e->bs[BS_FX] = (int32_t)lo << 16; }
-                if (e->x > hi) { e->x = hi; e->bs[BS_FX] = (int32_t)hi << 16; }
-                e->bs[BS_VX] = -e->bs[BS_VX];
-                e->bs[BS_LS] = 1;
-                set_state(b, e, 0, 1);
+            /* 0x41378F: loop frames 3..10 until the far-side braking zone.
+             * There rec[0x0C] becomes 14 and vx drops to +/-3; touching the
+             * bound clamps/reverses but does not end state 10. */
+            if (e->frame == 3) e->anim_first = 3;
+            if (e->automove) {
+                e->bs[BS_FX] += e->bs[BS_VX];
+                int nx = fx_round(e->bs[BS_FX]);
+                if (e->bs[BS_VX] > 0) {
+                    if (nx >= hi - 100) {
+                        e->anim_last = 14;
+                        e->bs[BS_VX] = FX_3_0;
+                    }
+                    if (nx >= hi) {
+                        nx = hi;
+                        e->bs[BS_FX] = (int32_t)hi << 16;
+                        e->bs[BS_VX] = -FX_3_0;
+                    }
+                } else {
+                    if (nx < lo + 100) {
+                        e->anim_last = 14;
+                        e->bs[BS_VX] = -FX_3_0;
+                    }
+                    if (nx <= lo) {
+                        nx = lo;
+                        e->bs[BS_FX] = (int32_t)lo << 16;
+                        e->bs[BS_VX] = FX_3_0;
+                    }
+                }
+                e->x = nx;
+                e->flip_x = e->bs[BS_VX] > 0;
             }
-            if (wrapped) { e->bs[BS_LS] = 1; set_state(b, e, 0, 1); }
+            /* 0x413984: leave only after frame 14's countdown reaches zero.
+             * Watchdog: if the attack AOM is absent the frame never advances,
+             * so also bail once the charge has run longer than the widest span
+             * plus the brake could take (safety net only; never hit in play). */
+            if ((e->frame == 14 && e->anim_timer == 0) || ++e->bs[BS_KT] > 400) {
+                e->force_offscreen = 0;
+                set_state(b, e, 0, 1);
+                e->anim_timer = 0;
+                e->bs[BS_LS] = 1;
+            }
         } else {
             patrol_x(e, lo, hi);
             if (attack_gate(b, e, d)) {
-                set_state(b, e, 16, 0);
+                int anim_timer = e->anim_timer;
+                int dir = e->bs[BS_VX] < 0 ? -1 : 1;
+                e->force_offscreen = 1;
+                e->bs[BS_VX] = dir * FX_6_0;
+                set_state(b, e, 16, 1);
+                e->anim_first = 0;
+                e->frame = 0;
+                e->anim_timer = anim_timer;
+                e->bs[BS_KT] = 0;
                 e->bs[BS_LS] = 10;
-                /* charge start: no telegraph sound in the exe */
+                if (b->h.sfx)
+                    b->h.sfx(FA_BEH_SFX_ENEMY_ATTACK, e->obj_nr, b->h.user);
             }
         }
         break;
@@ -1850,9 +1906,12 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
                 int ox = e->x + (right ? d->tspan + d->tdx : d->tdx);
                 int oy = e->y + d->tdy;
                 int vx = right ? d->tvx : -d->tvx;
-                /* 0x413B70: every enemy shot takes gravity +0.3 / terminal 20;
-                 * kong/yeti/snow/bear leave with vy -3, the egg with vy 0. */
-                spawn_proj(b, e->obj_nr, ox, oy, vx, d->tvy, FX_0_3, 120);
+                /* 0x413B70: kong/yeti/snow/bear shots take gravity +0.3 and
+                 * leave with vy -3.  The egg robot (obj 12) is the exception:
+                 * exe 0x4103C8 sets the egg's gravity word to 0, so it flies
+                 * dead straight (vx +-11, vy 0, no arc). */
+                int grav = e->obj_nr == 12 ? 0 : FX_0_3;
+                spawn_proj(b, e->obj_nr, ox, oy, vx, d->tvy, grav, 120);
             }
             if (!at_rel) e->bs[BS_AF] = 0;
             e->bs[BS_KT]++;

@@ -154,7 +154,7 @@ typedef struct {
     /* physics-tuning overrides (px/tick), <=0 = keep the default */
     double    ov_gravity, ov_jumpvel, ov_jumpvel2, ov_runspeed, ov_airaccel;
     /* RRR-44/45 tuning overrides (whole px), <=0 = keep the default */
-    int       ov_bboxw, ov_bboxh, ov_camdzx, ov_camdzy, ov_cambias;
+    int       ov_bboxw, ov_bboxh, ov_camrail, ov_camband, ov_cambias;
 } slice;
 
 static void slice_focus_first_menu(slice *s)
@@ -497,6 +497,7 @@ static void beh_sfx(int ev, int obj, void *ctx)
         case FA_BEH_SFX_ENEMY_LAUNCH: break;   /* alsf04 already played at KO  */
         case FA_BEH_SFX_ENEMY_ATTACK:          /* the dive - one cue per bird  */
             fa_audio_event(s->audio,
+                obj == 11 ? FA_SND_ENEMY_CHARGE     :
                 obj == 6  ? FA_SND_ENEMY_DIVE_EAGLE :
                 obj == 16 ? FA_SND_ENEMY_DIVE_BEE   : FA_SND_ENEMY_DIVE);
             break;
@@ -768,14 +769,19 @@ static void wire_level(slice *s)
     }
     set_world_ambient(s, s->world);
     apply_tuning(s);
-    if (s->ov_camdzx  > 0) s->cam.dz_x   = s->ov_camdzx;
-    if (s->ov_camdzy  > 0) s->cam.dz_y   = s->ov_camdzy;
-    if (s->ov_cambias != 0) s->cam.bias_y = s->ov_cambias;
+    if (s->ov_camrail > 0) { s->cam.rail_l = s->ov_camrail;
+                             s->cam.rail_r = FA_FB_W - s->ov_camrail; }
+    if (s->ov_camband > 0) { int mid = (s->cam.band_t + s->cam.band_b) / 2;
+                             s->cam.band_t = mid - s->ov_camband / 2;
+                             s->cam.band_b = mid + s->ov_camband / 2; }
+    if (s->ov_cambias != 0) { s->cam.band_t += s->ov_cambias;
+                              s->cam.band_b += s->ov_cambias; }
 
-    /* snap the camera onto the player for frame 0 - the exe does an intro
-     * pan (0x41129a), which is RRR-45 tuning */
-    fa_camera_center_on(&s->cam, fa_player_px(&s->pl),
-                        fa_player_py(&s->pl) + s->cam.bias_y);
+    /* frame 0 camera. Boss arenas (exe ds:0x4dabd4 = world+3) fix the frame -
+     * worlds 1/2/4 lock it, world 3 keeps following; regular levels point at
+     * the spawn (exe 0x4119c8 -> 0x434650). */
+    if (s->in_end) fa_camera_boss(&s->cam, s->world);
+    else fa_camera_intro(&s->cam, fa_player_px(&s->pl), fa_player_py(&s->pl));
 }
 
 /*
@@ -1326,7 +1332,8 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             slice_posloops(s);
             fa_player_tick(&s->pl, 0);          /* no input; body settles */
             if (s->coop) fa_player_tick(&s->pl2, 0);
-            fa_camera_follow(&s->cam, fa_player_px(&s->pl), fa_player_py(&s->pl));
+            fa_camera_follow(&s->cam, fa_player_px(&s->pl), fa_player_py(&s->pl),
+                             s->pl.facing == FA_FACE_RIGHT ? 0 : 1);
             if (s->have_kids) {
                 fa_player *dead = s->death_player ? &s->pl2 : &s->pl;
                 int k = s->death_player ? 1 : (s->pl.character & 1);
@@ -1669,7 +1676,8 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             }
         }
 
-        fa_camera_follow(&s->cam, fa_player_px(&s->pl), fa_player_py(&s->pl));
+        fa_camera_follow(&s->cam, fa_player_px(&s->pl), fa_player_py(&s->pl),
+                         s->pl.facing == FA_FACE_RIGHT ? 0 : 1);
         if (s->have_kids) {
             slice_update_kid_anim(s, &s->pl, s->pl.character & 1,
                                   &s->kid_was_crouch, &s->kid_rise);
@@ -1993,7 +2001,7 @@ int main(int argc, char **argv)
     int show_credits = 0;
     int win_scale = 0, fullscreen = 0, crisp = 0;
     double ov_g = 0, ov_j = 0, ov_j2 = 0, ov_r = 0, ov_a = 0;
-    int ov_bw = 0, ov_bh = 0, ov_cx = 0, ov_cy = 0, ov_cb = 0;
+    int ov_bw = 0, ov_bh = 0, ov_crail = 0, ov_cband = 0, ov_cb = 0;
     long seed_arg = -1;              /* RRR-57: >=0 pins the enemy RNG seed */
 
     for (int i = 1; i < argc; i++) {
@@ -2022,8 +2030,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--airaccel")  && i + 1 < argc) ov_a  = atof(argv[++i]);
         else if (!strcmp(argv[i], "--bboxw")     && i + 1 < argc) ov_bw = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--bboxh")     && i + 1 < argc) ov_bh = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "--camdzx")    && i + 1 < argc) ov_cx = atoi(argv[++i]);
-        else if (!strcmp(argv[i], "--camdzy")    && i + 1 < argc) ov_cy = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--camrail")   && i + 1 < argc) ov_crail = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--camband")   && i + 1 < argc) ov_cband = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--cambias")   && i + 1 < argc) ov_cb = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
             printf("fa_slice [--gdata DIR] [--world 1..4] [--tut|--end] "
@@ -2051,8 +2059,11 @@ int main(int argc, char **argv)
                    "  physics tuning (px/tick): --gravity 0.6 --jumpvel 11 "
                    "--jumpvel2 9 --runspeed 5 --airaccel 1.2\n"
                    "    (--jumpvel = penguin, --jumpvel2 = Fettalatte; D switches)\n"
-                   "  collision + camera (px): --bboxw 10 --bboxh 44 "
-                   "--camdzx 64 --camdzy 48 --cambias -120 (negative = look up)\n");
+                   "  collision (px): --bboxw 10 --bboxh 44\n"
+                   "  camera (px, exe-pinned): --camrail 130 (screen column "
+                   "the kid rides, flips with facing) --camband 200 (vertical "
+                   "follow-band height) --cambias 0 (shift the band; + = look "
+                   "down)\n");
             return 0;
         }
     }
@@ -2072,7 +2083,7 @@ int main(int argc, char **argv)
     s.ov_gravity = ov_g; s.ov_jumpvel = ov_j; s.ov_jumpvel2 = ov_j2;
     s.ov_runspeed = ov_r; s.ov_airaccel = ov_a;
     s.ov_bboxw = ov_bw; s.ov_bboxh = ov_bh;
-    s.ov_camdzx = ov_cx; s.ov_camdzy = ov_cy; s.ov_cambias = ov_cb;
+    s.ov_camrail = ov_crail; s.ov_camband = ov_cband; s.ov_cambias = ov_cb;
     s.rng_seed_set = seed_arg >= 0;
     s.rng_seed = s.rng_seed_set ? (uint32_t)seed_arg : (uint32_t)time(NULL);
     printf("enemy rng seed: %u%s\n", s.rng_seed,

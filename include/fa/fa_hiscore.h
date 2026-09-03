@@ -26,9 +26,10 @@
  * 28 chars, Backspace deletes, Enter confirms).  On confirm the table is
  * written to  <install>/Highscore{world}.dat  (beside the game, RRR-39; the
  * Save\ prefix the .exe used is dropped).  The reader prefers that file over
- * the shipped GData\Save\ copy.
+ * the shipped GData\Save\ copy.  Confirming the name also leaves straight to
+ * the menu - a console port has no pointer to click BACK or a world tab.
  *
- * Esc, Enter (outside name entry) or the BACK button leave to the menu.
+ * Esc, Enter or the BACK button leave to the menu.
  */
 #ifndef FA_HISCORE_H
 #define FA_HISCORE_H

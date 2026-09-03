@@ -212,6 +212,7 @@ static const snd_def SND_TBL[FA_SND__COUNT] = {
      * (ds:0x4DAC6E, loaded at 0x41208F); per-enemy grunts are a follow-up. */
     [FA_SND_ENEMY_THROW]     = { "SDat/alsf07.wav", 5, 0 },
     [FA_SND_ENEMY_THROW_EGG] = { "SDat/w3sf02.wav", 5, 0 },
+    [FA_SND_ENEMY_CHARGE]    = { "SDat/w3sf10.wav", 10, 0 },
     [FA_SND_ENEMY_DIVE]      = { "SDat/papagei.wav", 8, 0 },
     [FA_SND_ENEMY_DIVE_EAGLE]= { "SDat/w2sf01.wav", 8, 0 },
     [FA_SND_ENEMY_DIVE_BEE]  = { "SDat/w1sf03.wav", 8, 0 },

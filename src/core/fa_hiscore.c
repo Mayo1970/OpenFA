@@ -374,6 +374,9 @@ void fa_hiscore_tick(fa_hiscore *h, const fa_hiscore_in *in, fa_hiscore_ev *out)
             }
             h->place_rank = -1;
             h->state = HS_VIEW;
+            /* confirm the name AND leave to the menu - a console port has no
+             * pointer to click the BACK button or a world tab from here */
+            ev.leave = 1;
         }
         if (out) *out = ev;
         return;

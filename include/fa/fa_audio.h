@@ -81,6 +81,7 @@ typedef enum fa_snd_event {
     FA_SND_ENEMY_KNOCK,    /* alsf05.wav lane 4 */
     FA_SND_ENEMY_THROW,    /* alsf07.wav lane 5 - kong/yeti/snowman/bear throw (ds:0x4DAC6E) */
     FA_SND_ENEMY_THROW_EGG,/* w3sf02.wav lane 5 - egg robot throw (ds:0x4DAC60, 0x41037F) */
+    FA_SND_ENEMY_CHARGE,   /* w3sf10.wav lane 10 - small robot charge (ds:0x4DAC6A, 0x41371D) */
     FA_SND_ENEMY_DIVE,     /* papagei.wav lane 8 - parrot dive (ds:0x4E0AA8, 0x41622C) */
     FA_SND_ENEMY_DIVE_EAGLE,/* w2sf01.wav lane 8 - eagle dive (ds:0x4E0A90, 0x40A931) */
     FA_SND_ENEMY_DIVE_BEE, /* w1sf03.wav lane 8 - bee (ds:0x4DAC3C, 0x40C30A) */

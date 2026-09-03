@@ -22,14 +22,14 @@ void fa_camera_init(fa_camera *c, int vw, int vh, int world_w, int world_h)
     c->x = c->y = 0;
     c->vw = vw; c->vh = vh;
     c->world_w = world_w; c->world_h = world_h;
-    /* RRR-45 defaults (PL-111, owner-tunable): a 128x96 deadzone, no per-call
-     * cap, and a NEGATIVE bias so the focus sits below the viewport centre -
-     * the player rides the lower third of the screen with the level above it,
-     * matching the oracle framing. */
-    c->dz_x = 64;
-    c->dz_y = 48;
-    c->bias_y = -(vh / 5);
-    c->max_step = 0;
+    /* exe follow box: the rect stored at 0x411fd6 is {130,280,670,480} on an
+     * 800x600 screen; the per-call X slew cap in 0x4349c0 is 0x0a = 10. */
+    c->rail_l = 130;
+    c->rail_r = vw - 130;
+    c->band_t = 280;
+    c->band_b = 480;
+    c->step_x = 10;
+    c->locked = 0;
 }
 
 static void cam_clamp(fa_camera *c)
@@ -53,24 +53,43 @@ void fa_camera_center_on(fa_camera *c, int wx, int wy)
     cam_clamp(c);
 }
 
-void fa_camera_follow(fa_camera *c, int target_x, int target_y)
+void fa_camera_intro(fa_camera *c, int spawn_x, int spawn_y)
 {
-    /* focus point currently shown: viewport centre, lifted by bias_y */
-    int fx = c->x + c->vw / 2;
-    int fy = c->y + c->vh / 2 - c->bias_y;
+    /* exe 0x4119aa -> 0x434650: desired scroll = (spawn - 100, spawn - 400),
+     * tile-aligned then clamped. The tile-align is <=32 px and cosmetic. */
+    c->x = spawn_x - 100;
+    c->y = spawn_y - 400;
+    cam_clamp(c);
+}
 
-    int dx = 0, dy = 0;
-    if (target_x > fx + c->dz_x)      dx = target_x - (fx + c->dz_x);
-    else if (target_x < fx - c->dz_x) dx = target_x - (fx - c->dz_x);
-    if (target_y > fy + c->dz_y)      dy = target_y - (fy + c->dz_y);
-    else if (target_y < fy - c->dz_y) dy = target_y - (fy - c->dz_y);
+void fa_camera_boss(fa_camera *c, int world)
+{
+    /* exe: ds:0x4dabd4 = (world - 1) + 4 for a boss. The intro-cam table
+     * 0x412880 fixes the scroll (idx 5 = world 2 -> origin; idx 4/6/7 ->
+     * (32,224)); the lock switch 0x4128d0 then kills the follow for idx
+     * 4/5/7 (worlds 1/2/4) and leaves it on for idx 6 (world 3). */
+    if (world == 2) { c->x = 0;  c->y = 0;   }
+    else            { c->x = 32; c->y = 224; }
+    c->locked = (world != 3);
+    cam_clamp(c);
+}
 
-    if (c->max_step > 0) {
-        dx = clampi(dx, -c->max_step, c->max_step);
-        dy = clampi(dy, -c->max_step, c->max_step);
+void fa_camera_follow(fa_camera *c, int target_x, int target_y, int facing)
+{
+    if (c->locked) return;               /* exe follow gate ds:0x4e1018 */
+
+    /* exe 0x4349c0. screen_* = player world pos minus the current scroll. */
+    int screen_x = target_x - c->x;
+    int screen_y = target_y - c->y;
+
+    if (facing == 0 || facing == 1) {
+        int anchor = facing ? c->rail_r : c->rail_l;
+        c->x += clampi(screen_x - anchor, -c->step_x, c->step_x);
     }
-    c->x += dx;
-    c->y += dy;
+
+    if (screen_y < c->band_t)      c->y += screen_y - c->band_t;
+    else if (screen_y > c->band_b) c->y += screen_y - c->band_b;
+
     cam_clamp(c);
 }
 
