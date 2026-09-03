@@ -1,5 +1,5 @@
 /*
- * fa_bmp.c - Windows BMP -> RGB565 surface loader (RRR-10 addendum). See fa_bmp.h.
+ * fa_bmp.c - Windows BMP -> RGB565 surface loader. See fa_bmp.h.
  */
 #include "fa/fa_bmp.h"
 #include "fa/fa_surface.h"

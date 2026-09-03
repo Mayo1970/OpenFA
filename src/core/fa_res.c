@@ -1,6 +1,6 @@
 /*
- * fa_res.c - resource lifetime and streaming policy (RRR-38)
- * See include/fa/fa_res.h for the model and the RRR-8 / RRR-18 basis.
+ * fa_res.c - resource lifetime and streaming policy
+ * See include/fa/fa_res.h for the model.
  */
 #include "fa/fa_res.h"
 

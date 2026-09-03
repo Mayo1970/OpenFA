@@ -1,5 +1,5 @@
 /*
- * fa_hud.h - the in-level status display (RRR-51 AC5)
+ * fa_hud.h - the in-level status display
  *
  * The exe loads these sheets at level start (0x4083f0..0x4086d0) and redraws
  * them every frame in hud_draw (0x4089c0):
@@ -14,9 +14,9 @@
  *                                        the score
  * Every sprite blits at its own .W01 table-A origin, so the layout comes from
  * the art. There is NO lives counter in the exe HUD - health is the only
- * survival meter (0x45F014, max 100; 20 per hit; game over at 0, RRR-53).
+ * survival meter (0x45F014, max 100; 20 per hit; game over at 0).
  *
- * Score comes from 0x45ED2C (+100 per enemy / +100..+10000 per pickup, AC4).
+ * Score comes from 0x45ED2C (+100 per enemy / +100..+10000 per pickup).
  * Health from 0x45F014, mapped to an Energy frame by the exe thresholds
  * (>80 -> 4, >60 -> 3, >40 -> 2, >20 -> 1, >0 -> 0). Ammo from 0x45ED34,
  * Schuss frame = ammo - 1.
@@ -47,7 +47,7 @@ void fa_hud_free(fa_hud *h);
  *   dirty      non-zero selects the SchussD art (collect_dirtyballs, ObjNr 60)
  *   items      6 flags: items[i] != 0 shows recipe piece i+1 as collected
  *   character  0 penguin / 1 Milchschnitte - selects the Actors frame
- *   boss_hp    RRR-59: >= 0 in a boss arena (exe flag 0x45ECBC). The boss bar
+ *   boss_hp    >= 0 in a boss arena (exe flag 0x45ECBC). The boss bar
  *              (Boss/BossInterface + Boss/Energy frame boss_hp + Boss/Bosspics
  *              frame boss_pic) REPLACES the 6 recipe-piece icons. -1 = the
  *              normal HUD.

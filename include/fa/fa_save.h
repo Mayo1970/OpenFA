@@ -1,8 +1,7 @@
 /*
- * fa_save.h - Option.ini and Highscore1-4.dat text formats (RRR-47)
+ * fa_save.h - Option.ini and Highscore1-4.dat text formats
  *
- * Ported verbatim from the RRR-23 reference (save_format.h/.c), which round-
- * trips all 5 shipped files byte-identical. Lifted from JR_FERRERO.exe
+ * Round-trips all 5 shipped files byte-identical. Lifted from JR_FERRERO.exe
  * (base 0x400000):
  *   Option.ini  write   fcn.00409a60  (C_Option::Save)
  *   Option.ini  default fcn.004096e0  (written when the file is missing)
@@ -14,9 +13,8 @@
  * emits NO trailing newline, so a shipped file has exactly
  * (line_count - 1) CRLF pairs.
  *
- * Volume-line labels corrected per RRR-46 (PL-119): line 21 (index 20,
- * global 0x45ECC0) is MUSIC volume, line 22 (index 21, 0x45EFE4) is SOUND
- * volume - both 0..100. RRR-23 had the two swapped. The shipped values are
+ * Volume lines: line 21 (index 20, global 0x45ECC0) is MUSIC volume, line 22
+ * (index 21, 0x45EFE4) is SOUND volume - both 0..100. The shipped values are
  * 75 (line 21) and 100 (line 22): music 75, sound 100.
  */
 #ifndef FA_SAVE_H

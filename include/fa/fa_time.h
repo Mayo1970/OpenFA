@@ -1,15 +1,13 @@
 /*
- * fa_time.h - timing abstraction (RRR-33 timing layer)
+ * fa_time.h - timing abstraction
  *
- * Two clocks, kept separate exactly as the original does (RRR-9):
+ * Two clocks, kept separate as the original does:
  *
- *  - fa_time_now_ns: monotonic high-resolution counter. Port of the
- *    QueryPerformanceCounter path that paces the main loop (PL-033). Feeds
- *    fa_loop_frame. Never wall-clock; unaffected by NTP steps or DST.
+ *  - fa_time_now_ns: monotonic high-resolution counter (QueryPerformanceCounter
+ *    path). Paces the main loop. Never wall-clock; immune to NTP steps or DST.
  *
- *  - fa_time_wall_ms: free-running millisecond clock. Port of the timeGetTime
- *    path that RRR-9 found driving only the menu / attract animations
- *    (PL-035). Kept apart from the simulation clock on purpose.
+ *  - fa_time_wall_ms: free-running millisecond clock (timeGetTime path). Drives
+ *    only the menu / attract animations. Kept apart from the simulation clock.
  */
 #ifndef FA_TIME_H
 #define FA_TIME_H

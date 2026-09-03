@@ -1,5 +1,5 @@
 /*
- * fa_collide.c - swept AABB resolution against the map (RRR-44).
+ * fa_collide.c - swept AABB resolution against the map.
  * See fa_collide.h. Fixed-point 16.16, no float, one pixel per sub-step.
  */
 #include "fa/fa_collide.h"
@@ -61,7 +61,7 @@ int fa_collide_grounded(const fa_aabb_body *b, int drop_through,
     return floor_blocks(b, drop_through, fn, ctx);
 }
 
-/* Slope handling (RRR-44 follow-up). With per-pixel terrain the leading edge
+/* Slope handling. With per-pixel terrain the leading edge
  * hits the diagonal of a slope tile; without a step these read as stairs.
  * STEP_UP: on a grounded horizontal move, climb up to this many px over the
  *          obstruction and keep going.

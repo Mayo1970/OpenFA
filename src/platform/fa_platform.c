@@ -1,5 +1,5 @@
 /*
- * fa_platform.c - backend selection (RRR-41)
+ * fa_platform.c - backend selection
  * Select the native backend for the target. The Switch build must initialize
  * libnx's real display path; desktop builds retain SDL2 -> null fallback.
  */

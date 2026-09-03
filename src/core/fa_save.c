@@ -1,6 +1,5 @@
 /*
- * fa_save.c - Option.ini / Highscore1-4.dat text formats (RRR-47).
- * Ported from the RRR-23 reference (save_format.c). See fa_save.h.
+ * fa_save.c - Option.ini / Highscore1-4.dat text formats. See fa_save.h.
  */
 #include "fa/fa_save.h"
 

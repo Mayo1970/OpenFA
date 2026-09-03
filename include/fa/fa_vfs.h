@@ -1,26 +1,21 @@
 /*
  * fa_vfs.h - storage abstraction: write beside the game, never inside GData
- *            (RRR-39)
- *
- * Parity / design basis: ENGINE-ARCH section 8, RRR-12 (PL-041/042/043) and
- * RRR-23 (PL-071/072).
  *
  * The original writes three things and nothing else: Highscore1-4.dat,
  * Option.ini and tut.ini. It has no registry use, no per-level save and no
- * progression state (PL-041/042/043). On Windows every one of those files
- * lives inside the game data, in GData\Save\.
+ * progression state. On Windows every one of those files lives inside the
+ * game data, in GData\Save\.
  *
  * The port must not write into the asset source directory: on most targets
  * that tree is read-only (a mounted disc image, a system content partition,
  * a shared install), and it is the user's own legally-owned copy, which the
- * engine has no business modifying (../RRR-100). Instead the writable files
- * sit BESIDE GData, in the install directory - the player sees the
+ * engine has no business modifying. Instead the writable files sit BESIDE
+ * GData, in the install directory - the player sees the
  * executable, the GData/ folder, and the loose writable files next to each
  * other. So this module gives the engine two roots:
  *
  *   asset:   read-only. Points at the GData tree from a lawful copy of the
- *            game (ENGINE-ARCH section 9, the direct loader). Opening a path
- *            under this root for writing is refused - it cannot be done.
+ *            game. Opening a path under this root for writing is refused.
  *   user:    read-write. By default the directory that holds the GData tree
  *            and the original executable - so a player sees the exe, the
  *            GData/ folder, and the writable files (Option.ini, the
@@ -42,11 +37,11 @@
  * user: (the Save\ prefix is dropped, Log\ is kept); everything else goes to
  * asset:.
  *
- * Path normalisation (RRR-27): resolution lower-cases the relative path and
+ * Path normalisation: resolution lower-cases the relative path and
  * transliterates the German digraphs (ae/oe/ue/ss), so a case-sensitive
- * filesystem resolves the same references Windows did. The asset loader
- * (RRR-42) layers the dead-reference handling (PL-025) on top; this module
- * only does the case / digraph fold that every lookup needs.
+ * filesystem resolves the same references Windows did. The asset loader layers
+ * the dead-reference handling on top; this module only does the case / digraph
+ * fold that every lookup needs.
  */
 #ifndef FA_VFS_H
 #define FA_VFS_H
@@ -112,7 +107,7 @@ int fa_vfs_init_default(fa_vfs *v, const char *gdata_dir, const char *app);
 
 /*
  * Resolve a virtual path ("asset:..." / "user:...") to a real OS path in
- * `out`. Applies the RRR-27 case / digraph fold to the relative part.
+ * `out`. Applies the case / digraph fold to the relative part.
  * Returns 0, or -1 if the root prefix is missing or unset, the relative part
  * escapes the root (".."/absolute/drive), or `out` is too small.
  */
@@ -166,7 +161,7 @@ int fa_vfs_write_all(const fa_vfs *v, const char *vpath,
  * byte 0 (every tutorial shows). Save 0x40A0F0 rewrites all 4 bytes ("wb").
  * The state-0 level loader (0x411682) picks WeltNt.w01/.w02 when the world's
  * byte is 0, else WeltN. The byte is set to 1 when the tutorial is cleared
- * (0x412702 / the Paradiso voice-end path 0x4159BD). RRR-54, PL-142/PL-060.
+ * (0x412702 / the Paradiso voice-end path 0x4159BD).
  */
 
 /* Byte `world` (1..4) of tut.ini: 1 = the normal world layout, 0 = play the

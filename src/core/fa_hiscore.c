@@ -68,7 +68,7 @@ struct fa_hiscore {
 
     int         hover;         /* 0..3 = a tab, 4 = back, -1 = none            */
 
-    fa_vfs      vfs;           /* user: = beside the game (RRR-39), asset: GData */
+    fa_vfs      vfs;           /* user: = beside the game, asset: GData         */
     int         vfs_ok;
     char        gdata[600];    /* asset-read fallback for the shipped tables    */
 };
@@ -154,7 +154,7 @@ static int decode_frame(const fa_w01 *w, int i, fa_surface *dst,
     return 0;
 }
 
-/* user:Highscore{n}.dat (RRR-39, beside the game - what this screen writes)
+/* user:Highscore{n}.dat (beside the game - what this screen writes)
  * then the shipped GData\Save\ copy, else the built-in default. */
 static void load_world_table(fa_hiscore *h, fa_hs_file *hs, int w1)
 {

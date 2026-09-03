@@ -1,27 +1,27 @@
 /*
- * fa_charspr.h - character sprite sheet + animation playback (RRR-43 follow-up)
+ * fa_charspr.h - character sprite sheet + animation playback
  *
  * Draws the playable kids (PINGUIN.W01, MILCHSCHNITTE.W01) and, later, any
  * hand-animated actor that is NOT an AOM script object. AOM objects go
  * through fa_aom.h instead.
  *
- * PARITY BASIS (JR_FERRERO.exe, RRR-43/player-anim-disasm.md, PL-096..099)
+ * PARITY BASIS (JR_FERRERO.exe)
  *   - There is NO clip-id table. The player state machine (dispatch table at
  *     0x41A128) writes literal W01 frame numbers - {current, loop_start,
  *     inclusive_end, repeat} - into a 0x64-byte animation record per
  *     character (Penguin 0x4E0F30, Milch 0x4E0FA8). fa_charspr reproduces
- *     that as a per-pose clip the caller sets with the RE'd constants
+ *     that as a per-pose clip the caller sets with the disassembled constants
  *     (fa_cs_anim_bind_frames). repeat: loop (-1 in the exe) vs hold the last
  *     frame (0 in the exe).
  *   - Advance rate: the record's delay is 1, and the updater counts it down
  *     before each step, so a frame advances every SECOND 60 Hz tick = 30
- *     sheet fps. Set period 2 (PL-098).
+ *     sheet fps. Set period 2.
  *   - Facing (global 0x4E0F94): the raw art is LEFT-facing. Left uses it
  *     as-is (orientation mode 0); right is the engine's horizontal-flip blit
  *     (mode 2), same frame range. Mirrored placement reflects about the
- *     anchor: x = anchor_x - origin_x - width, y unchanged (PL-099). So
+ *     anchor: x = anchor_x - origin_x - width, y unchanged. So
  *     base_facing = -1.
- *   - Origin: the signed .W01 table-A value, added to the anchor (PL-079).
+ *   - Origin: the signed .W01 table-A value, added to the anchor.
  *
  * The WESTKA "Animation *.txt" sidecar is kept only as a human-readable clip
  * name source (fa_cs_parse_sidecar) - it is NOT the runtime selection data
@@ -75,7 +75,7 @@ typedef enum {
     FA_CS_THROW_FWD,
     FA_CS_THROW_UP,
     FA_CS_KO,
-    FA_CS_IDLE_A,       /* short idle fidget (PL-101) */
+    FA_CS_IDLE_A,       /* short idle fidget */
     FA_CS_IDLE_B,       /* long idle animation */
     FA_CS_CLIMB,        /* on a ladder; freeze the frame when not moving */
     FA_CS_PUSH,         /* Fettalatte shoving a heavy object */
@@ -177,7 +177,7 @@ int  fa_cs_anim_frame(const fa_cs_anim *a);   /* current sheet frame, or -1 */
  * Draw the current frame into `dst` with (anchor_x, anchor_y) at the sprite's
  * null point (the player's feet). Adds the signed table-A origin; when facing
  * != base_facing, horizontally mirrors and places at
- * anchor_x - origin_x - width (PL-099). Keys out 0x0000. `clip` may be NULL.
+ * anchor_x - origin_x - width. Keys out 0x0000. `clip` may be NULL.
  * Returns pixels written (>= 0) or -1.
  */
 long fa_cs_anim_draw(fa_cs_anim *a, const struct fa_surface *dst,

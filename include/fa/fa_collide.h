@@ -1,10 +1,10 @@
 /*
- * fa_collide.h - swept AABB resolution against the map (RRR-44)
+ * fa_collide.h - swept AABB resolution against the map
  *
  * A small, deterministic, integer-only collision resolver. It moves one
  * axis-aligned box by its per-tick velocity and resolves it against a
  * solid probe, one pixel at a time, so nothing tunnels even at the
- * terminal fall speed (20 px/tick, PL-087) or at snowball speed.
+ * terminal fall speed (20 px/tick) or at snowball speed.
  *
  * PARITY
  *   The original resolves collision inside the per-state player code
@@ -12,7 +12,7 @@
  *   on are:
  *     - the coarse solid query fcn.00434180 (IsTileSolid, plane 2): maps a
  *       world pixel to its tile and returns attr & 0x20 -> "stand on this".
- *       See fa_map.h / grid-cell-disasm.md, PL-094.
+ *       See fa_map.h.
  *     - the behaviour code (packed >> 9) & 0x7f: code & 2 has a top-row-only
  *       path in the pixel query fcn.0x4343c4 - a one-way / drop-through
  *       platform. code & 1 is the ladder bit (already used by fa_map).
@@ -26,8 +26,8 @@
  *   ledge; every sample is tile-quantised by the probe, exactly as the exe.
  *
  *   The box size (fa_player_tuning.body_hw / body_h) is a first pass, like
- *   the physics constants (PL-078): no exe symbol pins the player's
- *   collision extent. It is a tuning-only value - PL-109.
+ *   the physics constants: no exe symbol pins the player's collision extent.
+ *   It is a tuning-only value.
  */
 #ifndef FA_COLLIDE_H
 #define FA_COLLIDE_H

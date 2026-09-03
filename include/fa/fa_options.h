@@ -1,18 +1,17 @@
 /*
- * fa_options.h - the option-screen interaction model (RRR-47, PL-123/124)
+ * fa_options.h - the option-screen interaction model
  *
  * Reverse-engineered from JR_FERRERO.exe option handler 0x405740..0x4081ED.
  *
  * KNOWN GAP: the shipped `GData\Animation\Dummy\Option Screen\` art is ABSENT
- * from this install, so a faithful option SCREEN cannot be drawn this sprint
- * (menu-disasm.md section 2: "not a usable shipped screen ... requires asset
- * recovery"). What IS fully static and reproduced here is the interaction
- * model: two 0..100 volume sliders, keyboard + controller rebinding with the
- * duplicate-swap rule, and writing all 22 Option.ini lines on exit
- * (fa_save.h). The exact back-button and knob pixel sizes come from the
- * missing W01 and are not reproduced.
+ * from this install, so a faithful option SCREEN cannot be drawn. What IS
+ * fully static and reproduced here is the interaction model: two 0..100
+ * volume sliders, keyboard + controller rebinding with the duplicate-swap
+ * rule, and writing all 22 Option.ini lines on exit (fa_save.h). The exact
+ * back-button and knob pixel sizes come from the missing W01 and are not
+ * reproduced.
  *
- * Slider geometry, 800x600 (menu-disasm.md section 2, knob-origin X):
+ * Slider geometry, 800x600 (knob-origin X):
  *     music  Y=542, origin X 45..224   (v -> 45  + floor(179*v/100))
  *     sound  Y=542, origin X 345..525  (v -> 345 + floor(180*v/100))
  * Dragging subtracts half the knob width from the cursor before clamping;
@@ -30,7 +29,7 @@ extern "C" {
 typedef enum { FA_SLIDER_MUSIC = 0, FA_SLIDER_SOUND = 1 } fa_slider;
 
 /* Option.ini index for a slider's value: music = line 21 (idx 20),
- * sound = line 22 (idx 21). (PL-119: RRR-23's labels were swapped.) */
+ * sound = line 22 (idx 21). */
 #define FA_OPT_IDX_MUSIC 20
 #define FA_OPT_IDX_SOUND 21
 

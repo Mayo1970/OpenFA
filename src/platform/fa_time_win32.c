@@ -1,7 +1,7 @@
 /*
- * fa_time_win32.c - Windows clock backend (RRR-33 timing layer).
+ * fa_time_win32.c - Windows clock backend.
  * QueryPerformanceCounter for the monotonic clock, timeGetTime for the
- * menu / attract clock - the same split the original uses (RRR-9).
+ * menu / attract clock - the same split the original uses.
  */
 #if defined(_WIN32)
 

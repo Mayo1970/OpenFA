@@ -64,7 +64,7 @@ struct fa_entity_store {
 
     char           anim_dir[600];
 
-    /* RRR-50 runtime */
+    /* runtime */
     int            base_delay;       /* level[0x1735], 0 on load = 1 fr/tick */
     int            have_start;
     int            start_x, start_y;
@@ -76,12 +76,12 @@ struct fa_entity_store {
     void              *terrain_ctx;
 };
 
-/* generic faller physics (stop-gap until per-ObjNr AI, RRR-51) */
+/* generic faller physics (stop-gap until per-ObjNr AI) */
 #define FA_ENT_GRAVITY   72     /* 1/256 px per tick^2  (~0.28 px/tick^2) */
 #define FA_ENT_TERM_VY   (16 * 256)   /* terminal fall = 16 px/tick */
-/* RRR-57: the pickup handlers set rec[0x10] = 2 in their state-0 init
+/* the pickup handlers set rec[0x10] = 2 in their state-0 init
  * (collect_paradiso 0x40EE84, collect_energy 0x40EFB9 - both `mov [esi+0x10],2`),
- * so a bob frame lasts base_delay(0) + 2 + 1 = 3 ticks. Was 5 (feel guess). */
+ * so a bob frame lasts base_delay(0) + 2 + 1 = 3 ticks. */
 #define FA_ENT_PICKUP_DELAY  2  /* rec[0x10] for DetailGroup 1/2 pickups (exe) */
 
 /* --- directory listing (Scripts\*.jrs) --------------------------- */
@@ -251,7 +251,7 @@ fa_entity_store *fa_entity_load(const struct fa_map *map, const char *gdata)
         e->hidden = r[0xB9] != 0;
         e->force_offscreen = r[0xB8] != 0;
 
-        /* RRR-50 runtime fields (PL-128) */
+        /* runtime fields */
         e->active_reset           = rd_u16(r + 0x08);
         e->anim_first             = rd_i16(r + 0x0A);
         e->anim_last              = rd_i16(r + 0x0C);
@@ -424,7 +424,7 @@ int fa_entity_draw_band(const struct fa_surface *dst, const fa_entity_store *s,
             continue;
 
         /* render position == the hitbox (ent_frame_box), so a sprite and its
-         * collision box always coincide (RRR-51). */
+         * collision box always coincide. */
         int wx0, wy0, wx1, wy1;
         if (ent_frame_box(m, e, &wx0, &wy0, &wx1, &wy1) != 0) continue;
         int dx = wx0 - cam->x, dy = wy0 - cam->y;
@@ -458,13 +458,13 @@ int fa_entity_draw_band(const struct fa_surface *dst, const fa_entity_store *s,
 }
 
 /* ================================================================
- * RRR-50 runtime  (fcn.004335A0 update, fcn.00430CF0/D90 patrol,
+ * runtime  (fcn.004335A0 update, fcn.00430CF0/D90 patrol,
  * fcn.004118F5 player start, fcn.00412900 lift carry)
  * ================================================================ */
 
 /* Collision box of a pushable block: the sprite frame inset ~22% each side,
- * so it matches the visible base (the totem head is wider than the base;
- * PL-133 / push-disasm.md) and does not falsely jam against nearby scenery.
+ * so it matches the visible base (the totem head is wider than the base)
+ * and does not falsely jam against nearby scenery.
  * -1 if it has no sprite. */
 static int block_box(fa_entity_store *s, const fa_entity_rec *e,
                      int *x0, int *y0, int *x1, int *y1);
@@ -473,8 +473,7 @@ static int block_box(fa_entity_store *s, const fa_entity_rec *e,
 /*
  * Where a record's current frame is drawn, in world pixels. Traced to the
  * placed-AOM renderer 0x4338A0 + the geometry helper 0x431300 and the
- * load-time origin fix-up 0x443EA0 (RRR-51, RRR-51/enemy-render-and-hit-
- * disasm.md Q1).
+ * load-time origin fix-up 0x443EA0.
  *
  * Split the .W01 table-A dword into signed words a_x(f)/a_y(f). With
  * CorrectAlignToNull = 1 (the AOM default; every shipped asset sets it) the
@@ -525,7 +524,7 @@ static int ent_frame_box(fa_entity_store *s, const fa_entity_rec *e,
 static int block_box(fa_entity_store *s, const fa_entity_rec *e,
                      int *x0, int *y0, int *x1, int *y1)
 {
-    /* PL-135 / PL-136: the player-contact box of a pushable block is the full
+    /* the player-contact box of a pushable block is the full
      * sprite AABB - [X, X+fw) x [Y + rec[0x2A], Y+fh). No horizontal inset
      * (the earlier 22% inset did not match the exe). */
     if (ent_frame_box(s, e, x0, y0, x1, y1) != 0) return -1;
@@ -545,7 +544,7 @@ static void entity_init_runtime(fa_entity_store *st)
 
         /* the ObjNr 1000 (misc_start.jrs) marker carries the spawn X/Y; the
          * exe reads rec[+2]/rec[+4], places the player, then clears rec[+6]
-         * so it never renders (0x4118F5, PL-127). */
+         * so it never renders (0x4118F5). */
         if (e->obj_nr == 1000) {
             st->have_start = 1;
             st->start_x = e->x;
@@ -557,7 +556,7 @@ static void entity_init_runtime(fa_entity_store *st)
 
         /* generic default animation state = AOM state 0 (StartAnimLeft/
          * EndAnimLeft), else the FileAnim range. Per-ObjNr callbacks switch
-         * states later (RRR-51). */
+         * states later. */
         if (e->obj_nr < st->def_count && st->def_ok[e->obj_nr]) {
             const fa_aom_def *d = &st->def[e->obj_nr];
             if (d->move[FA_DIR_LEFT].set) {
@@ -575,9 +574,8 @@ static void entity_init_runtime(fa_entity_store *st)
         e->dx = e->dy  = 0;
 
         /* pickups bob / rotate much slower than the 1-frame-per-tick generic
-         * rate (owner playtest). The per-ObjNr AI would set rec[+0x10]
-         * (RRR-51); as a stop-gap give DetailGroup 1/2 a slow default when
-         * the disk value is 0. */
+         * rate. The per-ObjNr AI would set rec[+0x10]; as a stop-gap give
+         * DetailGroup 1/2 a slow default when the disk value is 0. */
         if ((e->detail_group == 1 || e->detail_group == 2) &&
             e->anim_extra_delay == 0)
             e->anim_extra_delay = FA_ENT_PICKUP_DELAY;
@@ -599,20 +597,20 @@ static void entity_init_runtime(fa_entity_store *st)
         /* classification. DetailGroup 0 = solid movable objects: a raft
          * moves or has patrol bounds (fcn.00411922 lift list); a block
          * (ObjNr 76 dschungel / 78 eis, DetailGroup 0, no motion) is
-         * pushable (PL-103). Everything else DetailGroup 3 (enemy) with
-         * collision on and no vertical patrol falls under generic gravity
-         * until RRR-51 gives it real per-type movement. */
+         * pushable. Everything else DetailGroup 3 (enemy) with collision on
+         * and no vertical patrol falls under generic gravity until the
+         * per-type movement lands. */
         e->is_lift = e->is_block = e->gravity = 0;
         e->vy_acc = e->deck_off = 0;
         if (e->obj_nr == 83) {
-            /* RRR-61: the FABBRICA boss-arena button. is_block so the player
+            /* the FABBRICA boss-arena button. is_block so the player
              * push probe (fa_beh_push) can register a shove; beh_button
              * watches for it and never lets the button slide. */
             e->is_block = 1;
         } else if (e->detail_group == 0) {
             if (e->obj_nr == 76 || e->obj_nr == 78 ||
                 e->obj_nr == 86 || e->obj_nr == 87) {
-                /* pushable blocks (PL-135): ObjNr 76/78/86/87 all run
+                /* pushable blocks: ObjNr 76/78/86/87 all run
                  * fcn.00414E50. Full-box solid; the real float physics
                  * (friction / gravity / swept collision / fall counter) is
                  * fa_beh's beh_block - the e->gravity stop-gap below only
@@ -623,11 +621,11 @@ static void entity_init_runtime(fa_entity_store *st)
                 /* a stand-on platform / raft: wide-and-flat DetailGroup-0.
                  * A tall DetailGroup-0 sprite (a lever misc_schalter, a
                  * barrel misc_fass) is not a platform - leave it as scenery
-                 * until RRR-51. The stand-on surface is
+                 * for now. The stand-on surface is
                  * `sprite_top + collision_bottom_adjust` (record +0x2A) -
                  * the exact top of the collision box the exe builds at
                  * 0x412A89 (box y0 = rec.Y + frame_origin_y + rec[+0x2A]);
-                 * general, per-object, no sprite heuristic (PL-136). */
+                 * general, per-object, no sprite heuristic. */
                 int x0, y0, x1, y1;
                 if (ent_frame_box(st, e, &x0, &y0, &x1, &y1) == 0 &&
                     (x1 - x0) > (y1 - y0)) {
@@ -690,7 +688,7 @@ int fa_entity_tick(fa_entity_store *s, int cx, int cy, int vw, int vh)
         e->dx = e->dy = 0;
         if (e->active == 0 || e->obj_nr < 0) continue;
 
-        /* RRR-60: a collected respawning pickup (DetailGroup 1/2, ammo/energy)
+        /* a collected respawning pickup (DetailGroup 1/2, ammo/energy)
          * counts down hidden, then reappears - exe rec[+0x74] = 0x4B0 (1200 t). */
         if ((e->detail_group == FA_AOM_DG_BONUS ||
              e->detail_group == FA_AOM_DG_POWERUP) &&
@@ -739,8 +737,8 @@ int fa_entity_tick(fa_entity_store *s, int cx, int cy, int vw, int vh)
                 break;
             }
 
-        /* generic physics (stop-gap; RRR-51 replaces it with the per-type
-         * AI). The ground probe uses the frame's bottom edge (align-to-null
+        /* generic physics (stop-gap; the per-type AI replaces it). The
+         * ground probe uses the frame's bottom edge (align-to-null
          * feet for enemies, sprite bottom for blocks); e->y is the no-sprite
          * fallback. */
         if (e->gravity && !has_beh && s->terrain) {
@@ -781,7 +779,7 @@ int fa_entity_tick(fa_entity_store *s, int cx, int cy, int vw, int vh)
                  * gravity - so an enemy perched at a platform edge is not
                  * dragged off it and lost. Only commit the snap when ground
                  * is actually within reach (else it is placed over a gap on
-                 * purpose - leave it for RRR-51's per-type AI). */
+                 * purpose - leave it for the per-type AI). */
                 e->snapped = 1;
                 int drop = 0;
                 while (drop < 224 &&
@@ -949,7 +947,7 @@ int fa_entity_pushable_at(const fa_entity_store *s, int px, int py)
         int x0, y0, x1, y1;
         if (block_box(m, e, &x0, &y0, &x1, &y1) != 0) continue;
         /* the caller probes a short reach past the player's own front edge,
-         * so this is an exact half-open box test (PL-135). */
+         * so this is an exact half-open box test. */
         if (px >= x0 && px < x1 && py >= y0 && py < y1) return 1;
     }
     return 0;

@@ -1,18 +1,14 @@
 /*
- * fa_res.h - resource lifetime and streaming policy (RRR-38)
- *
- * Parity / design basis: ENGINE-ARCH section 12, RRR-8 (boot load order) and
- * RRR-18 (the decoded .W01 working-set measurement).
+ * fa_res.h - resource lifetime and streaming policy
  *
  * The original preloads ~119 `.W01` AOM animations at boot into DirectDraw
- * surfaces and never frees them (PL / RRR-8). RRR-18 measured the decoded
- * cost: 170.3 MiB for all 192 `.W01`, and ROBOTER.W01 alone is 17.3 MiB -
- * more than the 16 MiB floor. A straight boot-set port therefore cannot run
- * on a constrained target. ENGINE-ARCH section 12 leaves the choice to this
- * module; RRR-38 decides: STREAM PER LEVEL. The engine loads a level's
- * resources when the level starts and evicts them when it ends. Desktop, with
- * memory to spare, may set a large budget so nothing is evicted mid-run - the
- * same code path, a bigger number.
+ * surfaces and never frees them. The decoded cost is 170.3 MiB for all 192
+ * `.W01`, and ROBOTER.W01 alone is 17.3 MiB - more than the 16 MiB floor. A
+ * straight boot-set port therefore cannot run on a constrained target. This
+ * module STREAMS PER LEVEL: the engine loads a level's resources when the
+ * level starts and evicts them when it ends. Desktop, with memory to spare,
+ * may set a large budget so nothing is evicted mid-run - the same code path,
+ * a bigger number.
  *
  * This is an explicit-lifetime cache, no implicit garbage collection:
  *
@@ -30,7 +26,7 @@
  *   fa_res_trim      evict LRU unreferenced entries until at or under budget.
  *
  * Use order is a monotonic sequence counter, never a wall clock, so eviction
- * is deterministic and replay-safe (ENGINE-ARCH goal 3).
+ * is deterministic and replay-safe.
  *
  * Per-level budgeting: fa_res_begin_level / fa_res_end_level bracket a level.
  * end_level logs that level's peak working set against its budget. The peak
@@ -48,9 +44,9 @@
 extern "C" {
 #endif
 
-/* The smallest working set any target is assumed to provide (ENGINE-ARCH
- * section 12). A per-level budget must be at least this; fa_res_cache_init
- * raises a smaller budget up to the floor and counts it. */
+/* The smallest working set any target is assumed to provide. A per-level
+ * budget must be at least this; fa_res_cache_init raises a smaller budget up
+ * to the floor and counts it. */
 #define FA_RES_FLOOR_BYTES   (16u * 1024u * 1024u)
 
 /* Frees a resource's data. `data` and `loader_ctx` are exactly what the

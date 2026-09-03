@@ -1,5 +1,5 @@
 /*
- * fa_backend_null.c - headless platform backend (RRR-41)
+ * fa_backend_null.c - headless platform backend
  *
  * No window, no device. The simulation clock advances a fixed 1/60 s per
  * pump(), so a bounded run is deterministic on every host and finite without

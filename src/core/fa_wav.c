@@ -1,5 +1,5 @@
 /*
- * fa_wav.c - PCM RIFF/WAVE reader (RRR-46). See fa_wav.h.
+ * fa_wav.c - PCM RIFF/WAVE reader. See fa_wav.h.
  */
 #include "fa/fa_wav.h"
 

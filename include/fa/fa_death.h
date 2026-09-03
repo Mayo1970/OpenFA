@@ -1,8 +1,8 @@
 /*
- * fa_death.h - what happens when the kid's health hits 0 (RRR-53)
+ * fa_death.h - what happens when the kid's health hits 0
  *
- * The kid has ONE survival meter: health (0x45F014, RRR-51). There is no
- * lives counter. When health reaches 0 the run is OVER:
+ * The kid has ONE survival meter: health (0x45F014). There is no lives
+ * counter. When health reaches 0 the run is OVER:
  *
  *   1. the player is locked into the KO animation for 240 ticks (4.0 s at
  *      60 Hz) - the rest of the level keeps running (enemies, platforms,
@@ -16,8 +16,7 @@
  * ends the run and sends you back to the front-end. The score resets when the
  * menu comes up (0x41154C).
  *
- * Reverse-engineered by hand off jr_disasm.txt + the exe .rdata (PL-141,
- * corrected 2026-08-31 - Codex was unavailable):
+ * Reverse-engineered by hand off jr_disasm.txt + the exe .rdata:
  *   - trigger: player update fcn.00417370 @ 0x417419 - health <= 0 and the
  *     death countdown 0x4E0B44 == -1 -> 0x4E0B44 = 0xF0 (240), sub-timer
  *     0x4E102C = 0x1E (30), player anim state 0x4E1028 = 0x22 (penguin) or
@@ -40,7 +39,6 @@
  *     = fcn.00402DB0 @ 0x402DE4 loads HighscoreBG.bmp + Schrift.w01 + the four
  *     Highscore{1-4}.dat, formats the score ("%d" @0x455358) - the CLASSIFICA
  *     screen - then hands on to the menu.
- *   See RRR-53/death-and-restart-disasm.md.
  *
  * This module is just the deterministic phase + timer for steps 1-2 (LAUNCH
  * 30, HOLD to 240, FADE 16, DONE). Integer-only. The host (fa_slice) drives

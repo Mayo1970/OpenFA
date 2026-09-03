@@ -1,5 +1,5 @@
 /*
- * fa_menu.c - the title / world-select screen (RRR-47). See fa_menu.h.
+ * fa_menu.c - the title / world-select screen. See fa_menu.h.
  */
 #include "fa/fa_menu.h"
 #include "fa/fa_surface.h"
@@ -12,7 +12,7 @@
 
 #define N_BTN 6
 
-/* Load / world / stage order (PL-122). Index i here is world i+1 for i<4. */
+/* Load / world / stage order. Index i here is world i+1 for i<4. */
 static const char *SPRITE_NAMES[N_BTN] = {
     "GIUNGLA", "MONTAGNA", "FABBRICA", "VALLE", "CLASSIFICA", "ESCI"
 };
@@ -20,9 +20,8 @@ static const char *SPRITE_LABELS[N_BTN] = {
     "world1", "world2", "world3", "world4", "scores", "quit"
 };
 
-/* Frame index per visual state. Worlds: 2 rest / 3 hover / 4 pressed (PL-121,
- * RRR-12 = every world available). CLASSIFICA / ESCI: frame 0 for every
- * state. */
+/* Frame index per visual state. Worlds: 2 rest / 3 hover / 4 pressed (every
+ * world is available). CLASSIFICA / ESCI: frame 0 for every state. */
 static const int WORLD_FRAME[3] = { 2, 3, 4 };
 
 typedef struct {

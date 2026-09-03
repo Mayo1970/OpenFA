@@ -1,9 +1,5 @@
 /*
- * fa_aom.h - animated-object (AOM) contract + runtime (RRR-37)
- *
- * Parity basis: RRR-21 "the AOM script contract" (PL-063..066), RRR-8 (boot
- * load order), RRR-9 (PL-033/034, the 60 Hz frame-locked clock) and RRR-18
- * (the .W01 sprite sheet the frame indices point into).
+ * fa_aom.h - animated-object (AOM) contract + runtime
  *
  * The original parses every `SCRIPT_TYP = "AOM"` file in `GData\Scripts\`
  * through `C_ScriptAom::DoScript` (`fcn.00436830`). Each line is one
@@ -13,34 +9,28 @@
  * from, keyed by `ObjNr`.
  *
  *   Required          ObjNr, FileName. Missing or invalid -> the original
- *                     raises a severity-9 diagnostic and drops the script
- *                     (PL-064); fa_aom_parse returns -1.
+ *                     raises a severity-9 diagnostic and drops the script;
+ *                     fa_aom_parse returns -1.
  *   Defaults          CorrectAlignToNull and UseVideoMem default to 1 when
- *                     the key is absent; every other key defaults to 0
- *                     (PL-064).
+ *                     the key is absent; every other key defaults to 0.
  *   Animation ranges  inclusive [start, end] frame ranges into the one .W01
  *                     sheet named by FileName. 8 movement directions, 8 idle
  *                     directions, and Attack / Freeze / KO. The 8-direction
  *                     and idle machinery exists in the parser but is dormant
  *                     in shipped content - only Left/Right/Up/Do and
- *                     Attack/Freeze/KO ranges are ever set (PL-065). The
- *                     runtime still implements the whole machine.
+ *                     Attack/Freeze/KO ranges are ever set. The runtime still
+ *                     implements the whole machine.
  *   DetailGroup       0..4 selects a behaviour class from DetailGroup.jrs:
- *                     0 LIFT/PLATFORM, 1 BONUS, 2 POWERUP, 3 ENEMY, 4 DETAIL
- *                     (PL-066). Collision resolves against group 0 (RRR-44);
- *                     group 3 drives Attack/Freeze/KO (RRR-51). The runtime
- *                     exposes a hook table per class so those later tasks
- *                     bind behaviour without touching this module.
+ *                     0 LIFT/PLATFORM, 1 BONUS, 2 POWERUP, 3 ENEMY, 4 DETAIL.
+ *                     Collision resolves against group 0; group 3 drives
+ *                     Attack/Freeze/KO. The runtime exposes a hook table per
+ *                     class so behaviour binds without touching this module.
  *
- * Playback timing: RRR-9 found the original advances exactly one step per
- * refresh-locked frame at a 60 Hz reference, and that animation timing must
- * be reproduced at 60 ticks/second. Neither the AOM script nor the WESTKA
- * `Animation *.txt` sidecar carries a per-frame duration, and corpus case
- * C09-animation-timing (the recorded idle/walk cadence, incl. the adler
- * sample) is still spec-only - the owner has not recorded it. So the runtime
- * advances one sheet frame per FA_AOM_TICKS_PER_FRAME ticks, default 1, the
- * only value the current evidence supports. When C09 is baselined, only that
- * constant (or a per-object override, fa_aom_set_frame_period) changes.
+ * Playback timing: the original advances exactly one step per refresh-locked
+ * frame at a 60 Hz reference. Neither the AOM script nor the WESTKA
+ * `Animation *.txt` sidecar carries a per-frame duration, so the runtime
+ * advances one sheet frame per FA_AOM_TICKS_PER_FRAME ticks (default 1). A
+ * per-object override is available via fa_aom_set_frame_period.
  */
 #ifndef FA_AOM_H
 #define FA_AOM_H
@@ -52,8 +42,7 @@
 extern "C" {
 #endif
 
-/* One sheet frame per this many 60 Hz simulation ticks (RRR-9 frame-locked
- * 1:1; see the header note and corpus case C09). */
+/* One sheet frame per this many 60 Hz simulation ticks (frame-locked 1:1). */
 #define FA_AOM_TICKS_PER_FRAME  1u
 
 /* Longest FileName value the token table stores (generous; shipped values
@@ -72,12 +61,12 @@ typedef enum {
     FA_AOM_SP_NONE = 0, FA_AOM_SP_ATTACK, FA_AOM_SP_FREEZE, FA_AOM_SP_KO
 } fa_aom_special;
 
-/* DetailGroup.jrs behaviour classes (PL-066). */
+/* DetailGroup.jrs behaviour classes. */
 typedef enum {
-    FA_AOM_DG_LIFT = 0,   /* LIFT/PLATTFORM - moving/solid platforms (RRR-44) */
+    FA_AOM_DG_LIFT = 0,   /* LIFT/PLATTFORM - moving/solid platforms          */
     FA_AOM_DG_BONUS,      /* BONUS   - collectibles / score pickups           */
     FA_AOM_DG_POWERUP,    /* POWERUP                                          */
-    FA_AOM_DG_ENEMY,      /* ENEMY   - drives Attack/Freeze/KO (RRR-51)       */
+    FA_AOM_DG_ENEMY,      /* ENEMY   - drives Attack/Freeze/KO                */
     FA_AOM_DG_DETAIL,     /* DETAIL  - non-interacting scenery                */
     FA_AOM_DG_COUNT
 } fa_aom_detail_group;
@@ -120,8 +109,7 @@ typedef struct fa_aom_def {
  *
  * Returns 0 on success, -1 on a hard error: not an AOM script, a missing or
  * invalid ObjNr / FileName, an unknown key, a non-integer value, or a range
- * whose end precedes its start. This mirrors the original's severity-9 abort
- * plus the RRR-21 validator.
+ * whose end precedes its start. This mirrors the original's severity-9 abort.
  */
 int fa_aom_parse(fa_aom_def *def, const char *src, size_t len,
                  char *diag, size_t diag_cap);

@@ -1,20 +1,19 @@
 /*
- * fa_platform.h - the platform backend interface (RRR-41)
+ * fa_platform.h - the platform backend interface
  *
- * Design basis: ENGINE-ARCH section 2 ("one backend per target") and section
- * 13 ("the core links zero external libraries"). The core and game layers
- * never call an OS API; they call this interface. A backend fills one
- * fa_platform struct at start-up and hands it to fa_app_run (fa_app.h).
+ * One backend per target; the core links zero external libraries. The core
+ * and game layers never call an OS API; they call this interface. A backend
+ * fills one fa_platform struct at start-up and hands it to fa_app_run
+ * (fa_app.h).
  *
- * Exactly one job per method, matched to what the original does (RRR-6 /
- * RRR-13 / RRR-9):
+ * Exactly one job per method, matched to what the original does:
  *
  *   pump      poll OS events once per frame, fill the fa_input for this frame
  *             (keyboard -> DIK array, mouse -> menu pointer), return 1 when
- *             the user asked to quit. One poll per loop iteration (PL-031).
+ *             the user asked to quit. One poll per loop iteration.
  *   present   copy an 800x600 RGB565 framebuffer to the screen and show it -
- *             the DirectDraw Blt-to-primary + Flip(DDFLIP_WAIT) step (PL-029).
- *   audio_push  queue interleaved S16 stereo frames at audio_rate. The RRR-30
+ *             the DirectDraw Blt-to-primary + Flip(DDFLIP_WAIT) step.
+ *   audio_push  queue interleaved S16 stereo frames at audio_rate. The audio
  *             pipeline already normalises every source to S16LE 44100 stereo.
  *   now_ns    the monotonic simulation clock (fa_time_now_ns on a real
  *             backend; a fixed synthetic step on the headless one).
@@ -24,7 +23,7 @@
  *   fa_backend_null   headless. now_ns advances a fixed 1/60 s per pump, so a
  *                     bounded run is deterministic and finite; present()
  *                     folds the framebuffer into an FNV-1a-32 hash.
- *   fa_backend_sdl2   the desktop backend (RRR-41). Built only when SDL2 is
+ *   fa_backend_sdl2   the desktop backend. Built only when SDL2 is
  *                     found; otherwise fa_backend_sdl2_create returns -1 and
  *                     fa_platform_create falls back to the null backend.
  *   fa_backend_switch libnx's software framebuffer and Npad input for the
@@ -43,7 +42,7 @@ extern "C" {
 struct fa_input;
 typedef struct fa_platform fa_platform;
 
-/* The original surface: 800x600x16 RGB565 (RRR-13, PL-029). */
+/* The original surface: 800x600x16 RGB565. */
 #define FA_FB_W  800
 #define FA_FB_H  600
 

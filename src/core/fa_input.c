@@ -1,5 +1,5 @@
 /*
- * fa_input.c - input abstraction with a menu pointer (RRR-40, M4 gate).
+ * fa_input.c - input abstraction with a menu pointer.
  * See include/fa/fa_input.h. Zero external dependencies (uses fa_vfs for the
  * Option.ini round trip).
  */
@@ -15,7 +15,7 @@ const int FA_INPUT_DEFAULT_BINDS[FA_ACT_COUNT] = {
     FA_DIK_A,    FA_DIK_S,     FA_DIK_F,  FA_DIK_D        /*  30  31  33  32 */
 };
 
-/* Option.ini lines 9-22 when the file is absent (RRR-23 defaults, no pad). */
+/* Option.ini lines 9-22 when the file is absent (defaults, no pad). */
 static const int OPT_TAIL_DEFAULT[FA_OPT_TAIL_LINES] = {
     -1, -1, -1, -1, -1, -1, -1, -1,   /* 9-16  controller slots  */
     -1, -1, -1, -1,                   /* 17-20 aux u16 pairs      */

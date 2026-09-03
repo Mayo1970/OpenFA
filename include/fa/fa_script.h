@@ -1,27 +1,23 @@
 /*
- * fa_script.h - Lua 4.0 assignment-subset evaluator (RRR-36)
+ * fa_script.h - Lua 4.0 assignment-subset evaluator
  *
- * Parity basis: RRR-11 (PL-039, PL-040) and ENGINE-ARCH section 10. The
- * original runs `GData\Scripts\*.jrs` through `C_LuaScript::DoFile`, which
+ * The original runs `GData\Scripts\*.jrs` through `C_LuaScript::DoFile`, which
  * loads each file as a bare Lua 4.0 chunk with NO standard library, NO host
  * callbacks and NO `DoString` / `DoBuffer` path (both are dead code). The
  * engine then reads the globals the chunk assigned.
  *
- * RRR-11 confirmed the reachable surface is tiny and frozen: 130 shipped
- * `.jrs` files, every line a single `NAME = value` assignment, value being a
- * string literal, an integer literal, or a reference to an earlier global
+ * The reachable surface is tiny and frozen: 130 shipped `.jrs` files, every
+ * line a single `NAME = value` assignment, value being a string literal, an
+ * integer literal, or a reference to an earlier global
  * (`MAP_WIDTH = FULLSCREEN_WIDTH`). No control flow, no functions, no table
  * constructors, no comments, no arithmetic. The animated-object scripts use a
- * separate hand-written parser (RRR-21), not this path.
+ * separate hand-written parser, not this path.
  *
- * DECISION (RRR-36, open item 3 in ENGINE-ARCH section 14): a purpose-built
- * evaluator, not a vendored interpreter. It matches Lua 4.0 EXACTLY for the
- * constructs the acceptance criteria name - number parsing, string escapes,
- * table constructors and variable references - and refuses anything outside
- * that subset with a line-numbered error. The core links zero external
- * libraries (ENGINE-ARCH section 13); a vendored Lua would break that and add
- * ~6k lines for a grammar the corpus never exercises. If future content needs
- * more of Lua 4.0, this is the seam to swap.
+ * A purpose-built evaluator, not a vendored interpreter. It matches Lua 4.0
+ * EXACTLY for number parsing, string escapes, table constructors and variable
+ * references, and refuses anything outside that subset with a line-numbered
+ * error. The core links zero external libraries. If future content needs more
+ * of Lua 4.0, this is the seam to swap.
  *
  * Grammar accepted (a strict subset of Lua 4.0):
  *
@@ -119,8 +115,8 @@ const char *fa_script_string(const fa_script *s, const char *name,
                              size_t *len_out);
 
 /*
- * Canonical text form of a global's value, for tests and the RRR-24
- * inspector: `nil`, an integer or `%.14g` number, a double-quoted string with
+ * Canonical text form of a global's value, for tests and the inspector:
+ * `nil`, an integer or `%.14g` number, a double-quoted string with
  * \ escapes, or `{ v1, v2, name=v, [k]=v }` in insertion order. Writes at
  * most `cap` bytes including the NUL. Returns the length that would be
  * written (as snprintf does), or -1 if the global is absent.

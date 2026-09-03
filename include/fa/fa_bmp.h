@@ -1,11 +1,10 @@
 /*
- * fa_bmp.h - Windows BMP -> RGB565 surface loader (RRR-10 addendum, RRR-47)
+ * fa_bmp.h - Windows BMP -> RGB565 surface loader
  *
  * The original brings the front-end background art (GData\Pics\*.bmp:
  * StartBG.bmp, HighscoreBG.bmp, Credit*.bmp) onto a DirectDraw surface once
- * at screen load with BitBlt / StretchDIBits through a memory DC
- * (RRR-10, PL-036). The port replaces that with a load-time decode to an
- * RGB565 fa_surface.
+ * at screen load with BitBlt / StretchDIBits through a memory DC. The port
+ * replaces that with a load-time decode to an RGB565 fa_surface.
  *
  * Handles uncompressed (BI_RGB) 24-bit and 32-bit bottom-up or top-down
  * Windows BMPs with a BITMAPINFOHEADER - which is every shipped .bmp

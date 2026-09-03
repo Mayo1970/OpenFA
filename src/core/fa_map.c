@@ -1,5 +1,5 @@
 /*
- * fa_map.c - level (.W02 chunk 0) loader (RRR-42). See fa_map.h.
+ * fa_map.c - level (.W02 chunk 0) loader. See fa_map.h.
  */
 #include "fa/fa_map.h"
 #include "fa/fa_w02.h"
@@ -108,7 +108,7 @@ int fa_map_plane_count(const fa_map *m)
 }
 
 /* Byte address of the (plane, cx, cy) entry, or NULL if out of range.
- * Plane-major: grid + plane*(3*w*h) + 3*(cy*w + cx)  (PL-090). */
+ * Plane-major: grid + plane*(3*w*h) + 3*(cy*w + cx). */
 static const uint8_t *entry_ptr(const fa_map *m, int plane, int cx, int cy)
 {
     if (!m || !m->grid) return NULL;
@@ -149,7 +149,7 @@ int fa_map_ladder_at(const fa_map *m, int world_x, int world_y)
     if (world_x < 0 || world_y < 0 ||
         world_x >= m->world_w || world_y >= m->world_h)
         return 0;
-    /* PL-102: a ladder is a plane-2 grid entry with collision code bit 0 set */
+    /* a ladder is a plane-2 grid entry with collision code bit 0 set */
     fa_map_entry e = fa_map_cell_entry(m, world_x / m->info.tile_w,
                                        world_y / m->info.tile_h, 2);
     if (fa_map_entry_empty(e)) return 0;

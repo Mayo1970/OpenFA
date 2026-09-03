@@ -1,23 +1,22 @@
 /*
- * fa_render.h - scene camera + frame compositor (RRR-42)
+ * fa_render.h - scene camera + frame compositor
  *
  * Composites one 800x600 RGB565 frame from a level: the far backdrop .W01
  * frame first, then the tile grid plane by plane (0 back .. N-1 front), with
  * DirectDraw-style BltFast (fa_surface.h). Mirrors the original render loop
- * fcn.00433110 (see fa_map.h / grid-cell-disasm.md).
+ * fcn.00433110.
  *
- * What is faithful: the pixel format, the keyed blit, the plane draw order
- * (RRR-10), the tile source-rect math (tile = packed & 0x1FF; atlas = attr &
- * 7; src = (tile%cols, tile/cols) * tile_size; flip from attr & 0x18), and
- * the "code > 50 / attr & 0x40 / off-atlas tile -> do not draw" rules.
+ * What is faithful: the pixel format, the keyed blit, the plane draw order,
+ * the tile source-rect math (tile = packed & 0x1FF; atlas = attr & 7;
+ * src = (tile%cols, tile/cols) * tile_size; flip from attr & 0x18), and the
+ * "code > 50 / attr & 0x40 / off-atlas tile -> do not draw" rules.
  *
  * The far backdrop (frame 4 of the level .W01) is screen-locked: it pans
- * only across its own slack on each axis and never wraps (RRR-55). The 8
- * grid planes all scroll 1:1 - MapInfo+278 gives every plane parallax
- * factor 2 (see RRR-55/draw-order-disasm.md).
+ * only across its own slack on each axis and never wraps. The 8 grid planes
+ * all scroll 1:1 - MapInfo+278 gives every plane parallax factor 2.
  *
- * What is best-effort and still owner-verified against the RRR-6 oracle:
- *   - the designer meaning of the collision code bits and attr 0x80.
+ * Best-effort, not fully verified: the designer meaning of the collision code
+ * bits and attr 0x80.
  *
  * A scene with no fa_tileset (tiles == NULL) falls back to the old
  * occupancy-colour overlay so the semantics tests run without GData.
@@ -41,7 +40,7 @@ typedef struct fa_camera {
     int vw, vh;            /* viewport size (800x600)              */
     int world_w, world_h;  /* level extent in pixels, for the clamp */
 
-    /* RRR-45 follow behaviour, re-derived from the exe (follow routine
+    /* Follow behaviour, re-derived from the exe (follow routine
      * 0x4349c0; the box it reads is stored by 0x411fd6 = {130,280,670,480}
      * for an 800x600 screen). It is NOT a symmetric deadzone:
      *  - X: the player is pinned to screen column `rail_l` while facing
@@ -79,7 +78,7 @@ void fa_camera_intro(fa_camera *c, int spawn_x, int spawn_y);
  * 0x4128d0); world 3's arena keeps following. Sets `locked` accordingly. */
 void fa_camera_boss(fa_camera *c, int world);
 
-/* RRR-45: per-frame follow (exe 0x4349c0). `facing` is 0 (player faces
+/* Per-frame follow (exe 0x4349c0). `facing` is 0 (player faces
  * right) or 1 (faces left); any other value leaves X unchanged this call.
  * X slews toward the facing rail at most step_x px; Y snaps the player
  * back inside the push band; then the result clamps to the world bounds. */
@@ -103,8 +102,8 @@ void fa_tileset_free(fa_tileset *ts);
 int fa_tileset_frame_count(const fa_tileset *ts);
 
 /*
- * Per-pixel terrain collision (RRR-44 follow-up), reproducing the exe's
- * richer query fcn.00434240: it maps a world pixel to a plane-2 tile, and
+ * Per-pixel terrain collision, reproducing the exe's richer query
+ * fcn.00434240: it maps a world pixel to a plane-2 tile, and
  * if that tile has attr & 0x20 it samples the actual decoded atlas pixel at
  * the flip-transformed sub-tile offset - a non-key pixel is solid. This is
  * what makes SLOPES follow their drawn diagonal instead of reading as a

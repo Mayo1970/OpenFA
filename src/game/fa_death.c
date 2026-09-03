@@ -1,13 +1,13 @@
 /*
- * fa_death.c - the KO-hold + fade timer for a lost run (RRR-53). See
- * fa_death.h for the disassembly this mirrors (PL-141).
+ * fa_death.c - the KO-hold + fade timer for a lost run. See fa_death.h for
+ * the disassembly this mirrors.
  */
 #include "fa/fa_death.h"
 
 #include <string.h>
 
-/* KO clip spans: {first, loop, last}. Play first..last once (1 frame/tick,
- * RRR-9 frame-lock), then loop..last. Same values fa_slice binds as FA_CS_KO. */
+/* KO clip spans: {first, loop, last}. Play first..last once (1 frame/tick),
+ * then loop..last. Same values fa_slice binds as FA_CS_KO. */
 static const int SPAN_PENGUIN[3] = { 150, 158, 162 };  /* state 0x22/0x23 */
 static const int SPAN_MILCH[3]   = {  36,  44,  48 };  /* state 0x24/0x25 */
 

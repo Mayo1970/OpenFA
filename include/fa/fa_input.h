@@ -1,11 +1,8 @@
 /*
- * fa_input.h - input abstraction with a menu pointer (RRR-40, M4 gate)
- *
- * Parity / design basis: ENGINE-ARCH section 7, RRR-14 (PL-031/032) and
- * RRR-23 (PL-071).
+ * fa_input.h - input abstraction with a menu pointer
  *
  * Gameplay still uses the original keyboard model: a 256-entry DirectInput
- * keyboard-state array once per tick with zero buffered events (PL-031), and
+ * keyboard-state array once per tick with zero buffered events, and
  * derives "just pressed" by diffing the previous tick. This module keeps that
  * model exactly: a 256-byte current array and a 256-byte previous array,
  * indexed by DIK scancode, with the previous array taken once per frame by
@@ -15,18 +12,18 @@
  *
  * The menu / front-end uses a pointer and button-DOWN edges only. The
  * original reads Win32 messages 512/513/515/516/256 and never handles
- * WM_LBUTTONUP (PL-032). This module carries a pointer (x, y) and three
+ * WM_LBUTTONUP. This module carries a pointer (x, y) and three
  * button states, again with a per-frame previous copy for the down edge.
  *
- * Binds are DIK scancodes in Option.ini lines 1-8 (PL-071):
+ * Binds are DIK scancodes in Option.ini lines 1-8:
  *   line 1-4   203 205 200 208   Left Right Up Down
  *   line 5-8    30  31  33  32   Jump(A) Fire(S) Action(F) spare(D)
  * fa_input_load_binds() / fa_input_save_binds() read and write that file
- * through the RRR-39 VFS, touching only lines 1-8 and preserving lines 9-22
+ * through the VFS, touching only lines 1-8 and preserving lines 9-22
  * (controller slots + volumes) byte for byte. Duplicate or unset (-1) binds
- * are rejected, exactly as the original reader does (RRR-23).
+ * are rejected, exactly as the original reader does.
  *
- * Console fallback (RRR-40 AC2): fa_input_stick() integrates a virtual menu
+ * Console fallback: fa_input_stick() integrates a virtual menu
  * pointer from a -1..1 stick vector; fa_input_pad() maps a face button to a
  * gameplay action.
  */
@@ -107,7 +104,7 @@ typedef enum {
 #define FA_INPUT_MAX_PADS 2
 
 /* Option.ini lines 9-22: 8 controller slots + 4 aux u16 + SFX vol + music
- * vol (RRR-23). Preserved verbatim across a save. */
+ * vol. Preserved verbatim across a save. */
 #define FA_OPT_TAIL_LINES  14
 
 typedef struct fa_input {
@@ -134,7 +131,7 @@ typedef struct fa_input {
     int           opt_tail_loaded;     /* 0 until a full Option.ini was read */
 } fa_input;
 
-/* The original defaults (PL-071): arrows then A/S/F/D. */
+/* The original defaults: arrows then A/S/F/D. */
 extern const int FA_INPUT_DEFAULT_BINDS[FA_ACT_COUNT];
 
 /* --- lifecycle ------------------------------------------------------- */
@@ -177,7 +174,7 @@ int   fa_input_pad_button_pressed_slot(const fa_input *in, int slot,
                                        fa_pad_button btn);
 float fa_input_pad_axis_slot(const fa_input *in, int slot, fa_pad_axis axis);
 
-/* --- console fallback (RRR-40 AC2) --------------------------------- */
+/* --- console fallback --------------------------------------------- */
 
 /* Move the virtual pointer by one tick's worth of a -1..1 stick vector.
  * A radius below 0.15 is treated as centred. */
@@ -233,7 +230,7 @@ int  fa_input_load_binds(fa_input *in, const struct fa_vfs *v, const char *vpath
 
 /*
  * Write Option.ini through the VFS: 22 CRLF-separated integer lines, no
- * trailing newline (RRR-23). Lines 1-8 are the current binds; lines 9-22 are
+ * trailing newline. Lines 1-8 are the current binds; lines 9-22 are
  * the verbatim tail from the last successful load, or the original defaults
  * (-1 x12, 75, 100) if none was loaded. Returns 0 or -1.
  */

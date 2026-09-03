@@ -1,7 +1,7 @@
 /*
- * fa_paths_win32.c - the per-user writable directory on Windows (RRR-39).
+ * fa_paths_win32.c - the per-user writable directory on Windows.
  *
- * ENGINE-ARCH section 8: the port redirects Save/, Log/ and generated files
+ * The port redirects Save/, Log/ and generated files
  * to a per-user path. On Windows that is %APPDATA%\<app> (roaming), with
  * %USERPROFILE%\<app> as a fallback. The directory is created if missing.
  */

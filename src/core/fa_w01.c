@@ -1,6 +1,5 @@
 /*
- * fa_w01.c - .W01 container + frame decode (RRR-42)
- * Ports RRR-17/w01_header.c and RRR-18/w01_pixels.c into the engine core.
+ * fa_w01.c - .W01 container + frame decode. See fa_w01.h.
  */
 #include "fa/fa_w01.h"
 
@@ -18,7 +17,7 @@ static uint32_t rd32(const uint8_t *p)
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-/* --- pixel decode (RRR-18) ---------------------------------------- */
+/* --- pixel decode ------------------------------------------------- */
 
 static int dec_store(const uint8_t *in, size_t avail, uint16_t *out, size_t px)
 {
@@ -102,8 +101,8 @@ static int parse(fa_w01 *o)
         off = next;
     }
 
-    /* table A: the fc*u32 that precede the fc*u32 table B at EOF (RRR-18).
-     * entry = x | (y << 16), screen pixels (PL-079). */
+    /* table A: the fc*u32 that precede the fc*u32 table B at EOF.
+     * entry = x | (y << 16), screen pixels. */
     if (o->len >= (size_t)n * 8) {
         size_t ta = o->len - (size_t)n * 8;
         for (int i = 0; i < n; i++) {

@@ -1,5 +1,5 @@
 /*
- * fa_time_posix.c - POSIX clock backend (RRR-33 timing layer).
+ * fa_time_posix.c - POSIX clock backend.
  * CLOCK_MONOTONIC for the simulation clock, CLOCK_REALTIME for the
  * menu / attract clock. Used by the Linux / macOS desktop build and as the
  * base for later SDL / console backends.

@@ -1,6 +1,6 @@
 /*
- * fa_audio.c - software mixer, resampler and event layer (RRR-46).
- * See fa_audio.h. Model: RRR-46/audio-disasm.md (PL-114..120).
+ * fa_audio.c - software mixer, resampler and event layer.
+ * See fa_audio.h.
  */
 #include "fa/fa_audio.h"
 #include "fa/fa_wav.h"
@@ -15,7 +15,7 @@
 #endif
 
 /* ================================================================== *
- *  Polyphase integer-ratio upsampler (port of RRR-30 resample.py)
+ *  Polyphase integer-ratio upsampler
  *  Rates are 11025 / 22050 / 44100 -> 44100, so L is 1, 2 or 4.
  *  Prototype: Hann-windowed sinc, half = 8 lobes, unity DC gain.
  * ================================================================== */
@@ -172,7 +172,7 @@ static int wav_open_rel(fa_wav *w, const char *gdata, const char *rel)
 }
 
 /* ================================================================== *
- *  Event table  (RRR-46/audio-disasm.md section 5, PL-118)
+ *  Event table
  *  channel < 0  -> TENTATIVE / unknown; the event is a warned no-op.
  * ================================================================== */
 
@@ -195,15 +195,13 @@ static const snd_def SND_TBL[FA_SND__COUNT] = {
     /* penguin glide/flight: glide-state entry 0x41858F plays sample
      * [0x4dac3e] (preloaded at 0x41204d) on lane 0, once; stopped by
      * 0x422E04(0) on glide exit. The exe's string is "GData\SDat\alsf02.wav",
-     * but the owner's playtest against the original picked ALSF02_old.wav as
-     * the take that matches - the shipped alsf02.wav (Feb 2002, shorter) is a
-     * later regressed rip. Owner decision 2026-08-30. */
+     * but ALSF02_old.wav is the take that matches the original - the shipped
+     * alsf02.wav (Feb 2002, shorter) is a later regressed rip. */
     [FA_SND_GLIDE]        = { "SDat/ALSF02_old.wav",  0, 0 },
-    /* RRR-50 owner playtest (PL-134): the collectible pickup jingle is
-     * alsf09.wav on channel 2 (fcn.0x41153D, fired from the per-frame HUD
-     * update when the pickup flag [0x4DAC48] is set) - NOT knusper.wav,
-     * which RRR-46 PL-118 tentatively assigned. knusper (0x416D2D) is a
-     * separate "eat" cue. */
+    /* the collectible pickup jingle is alsf09.wav on channel 2
+     * (fcn.0x41153D, fired from the per-frame HUD update when the pickup flag
+     * [0x4DAC48] is set) - NOT knusper.wav. knusper (0x416D2D) is a separate
+     * "eat" cue. */
     [FA_SND_PICKUP]       = { "SDat/alsf09.wav",   2, 0 },
     [FA_SND_PUSH]         = { "SDat/schieben.wav", 6, 0 },
     [FA_SND_ENEMY_DEFEAT] = { "SDat/alsf04.wav",   3, 0 },
@@ -234,13 +232,12 @@ static const snd_def SND_TBL[FA_SND__COUNT] = {
     [FA_SND_W3_BOSS_KO]     = { "SDat/w3sf04b.wav",           10, 0 },
     [FA_SND_W4_BOSS_DRINK]  = { "SDat/w4sf01.wav",             9, 0 },
     [FA_SND_W4_BOSS_SHOT]   = { "SDat/w4sf02.wav",             9, 0 },
-    /* RRR-60: yeti boss. Preload 0x4122C8: w2sf05 handle -> ds:0x4DAC54
+    /* yeti boss. Preload 0x4122C8: w2sf05 handle -> ds:0x4DAC54
      * (hurt grunt, exe ch 10), w2sf04 handle -> ds:0x4E0AA4 (landing thud,
      * exe ch 9). */
     [FA_SND_W2_BOSS_LAND]   = { "SDat/w2sf04.wav",             9, 0 },
     [FA_SND_W2_BOSS_HURT]   = { "SDat/w2sf05.wav",            10, 0 },
-    /* idle voice lines - channel 17 (voice), one-shot (player-anim-disasm-2
-     * section 1; Codex-confirmed .data strings). */
+    /* idle voice lines - channel 17 (voice), one-shot. */
     [FA_SND_PENGUIN_IDLE_A1] = { "SDat/voices/ita/pi0001.wav", FA_CH_VOICE, 0 },
     [FA_SND_PENGUIN_IDLE_A2] = { "SDat/voices/ita/pi0002.wav", FA_CH_VOICE, 0 },
     [FA_SND_PENGUIN_IDLE_B]  = { "SDat/gaehnen.wav",           FA_CH_VOICE, 0 },
@@ -398,8 +395,7 @@ int fa_audio_event(fa_audio *a, fa_snd_event ev)
     if (!d->file || d->channel < 0) {
         if (!(a->warned & (1ull << ev))) {
             a->warned |= (1ull << ev);
-            fprintf(stderr, "fa_audio: event %d unresolved "
-                            "(RRR-46/audio-disasm.md)\n", (int)ev);
+            fprintf(stderr, "fa_audio: event %d unresolved\n", (int)ev);
         }
         return -1;
     }

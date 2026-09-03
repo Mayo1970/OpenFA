@@ -1,6 +1,6 @@
 /*
- * fa_aom.c - animated-object (AOM) contract + runtime (RRR-37)
- * See include/fa/fa_aom.h for the model and the RRR-21 / RRR-9 basis.
+ * fa_aom.c - animated-object (AOM) contract + runtime
+ * See include/fa/fa_aom.h for the model.
  */
 #include "fa/fa_aom.h"
 
@@ -276,7 +276,7 @@ int fa_aom_parse(fa_aom_def *def, const char *src, size_t len,
         }
     }
 
-    /* SCRIPT_TYP gate (RRR-21 is_aom) */
+    /* SCRIPT_TYP gate */
     if (!got_typ || !typ_ok) {
         diag_add(diag, diag_cap, "not an AOM script (SCRIPT_TYP missing or != AOM)");
         return -1;
@@ -291,7 +291,7 @@ int fa_aom_parse(fa_aom_def *def, const char *src, size_t len,
         hard_error = 1;
     }
 
-    /* range order, only when both keys were given (RRR-21) */
+    /* range order, only when both keys were given */
     for (int d = 0; d < FA_DIR_COUNT; d++) {
         if (sm[d].gotS && sm[d].gotE && def->move[d].end < def->move[d].start) {
             diag_add(diag, diag_cap, "range StartAnim%s(%d) > EndAnim%s(%d)",

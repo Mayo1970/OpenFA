@@ -1,9 +1,9 @@
 /*
- * fa_credits.h - the credits sequence (RRR-54)
+ * fa_credits.h - the credits sequence
  *
  * Reverse-engineered from JR_FERRERO.exe credits handler fcn.0040FBC0
  * (0x40FBC0..0x40FD65), scenes 21/22/23 of the global scene selector
- * 0x45F008. See RRR-54/menu-disasm.md (PL-143/144).
+ * 0x45F008.
  *
  * The screen:
  *   1. show GData\pics\Credit1.bmp .. Credit4.bmp full-screen, in order
@@ -20,7 +20,7 @@
  * (FA_CREDITS_PAGE_DWELL) PLUS a skip flag, so the screen runs unattended in a
  * headless test and can still be paged by hand in fa_slice.
  *
- * Integer-only and deterministic (the RRR-34 replay contract).
+ * Integer-only and deterministic (the replay contract).
  */
 #ifndef FA_CREDITS_H
 #define FA_CREDITS_H
@@ -44,7 +44,7 @@ typedef enum {
 /* Ticks a BMP page holds before it auto-advances (not an exe constant - the
  * original waits for input; 6 s at 60 Hz here). A skip advances immediately. */
 #define FA_CREDITS_PAGE_DWELL 360
-/* Ticks per ENDTITLES.W01 frame (RRR-9 frame lock is 1/tick; the credits roll
+/* Ticks per ENDTITLES.W01 frame (the frame lock is 1/tick; the credits roll
  * is slower - 3 ticks/frame reads at a comfortable scroll). */
 #define FA_CREDITS_ET_PERIOD  3
 

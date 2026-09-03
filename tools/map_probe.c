@@ -1,5 +1,5 @@
 /*
- * map_probe.c - dump a .W02 level's MapInfo header and grid stats (RRR-42).
+ * map_probe.c - dump a .W02 level's MapInfo header and grid stats.
  *
  *   map_probe <file.W02>            chunk 0 MapInfo + first cells
  *   map_probe <file.W02> --cells N  also print the first N non-empty cells
@@ -38,7 +38,7 @@ int main(int argc, char **argv)
     printf("grid bytes %u  (= w*h*%u, %s)\n", in->grid_bytes, FA_MAP_CELL_STRIDE,
            in->grid_bytes == (uint32_t)in->grid_w * in->grid_h * FA_MAP_CELL_STRIDE
            ? "ok" : "MISMATCH");
-    printf("tail bytes %u  (object / entity data, RRR-50)\n", m.tail_size);
+    printf("tail bytes %u  (object / entity data)\n", m.tail_size);
     printf("planes     %d   atlas cols %d\n", in->plane_count, in->atlas_cols);
     printf("bg layers  {%d,%d,%d,%d,%d}  ([0..3] tile atlases, [4] backdrop)\n",
            in->bg_layer[0], in->bg_layer[1], in->bg_layer[2],

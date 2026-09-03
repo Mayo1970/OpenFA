@@ -1,5 +1,5 @@
 /*
- * fa_slice.c - the desktop vertical-slice entry point (RRR-41/42/43/47).
+ * fa_slice.c - the desktop vertical-slice entry point.
  *
  *   fa_slice                 open a window; show the title / world-select menu
  *                            if GData is found, else a test pattern. Click a
@@ -15,9 +15,9 @@
  *   fa_slice --tone          keep the 440 Hz tone on (default: 1 s at start)
  *   fa_slice --silent        no startup tone
  *   fa_slice --frames N      run N frames headless and print stats
- *   fa_slice --seed N        pin the enemy RNG (default: wall clock, RRR-57)
+ *   fa_slice --seed N        pin the enemy RNG (default: wall clock)
  *
- * Menu: this is the screen the real game opens on. Compare it to the oracle.
+ * Menu: this is the screen the real game opens on.
  *       Mouse, keyboard arrows, and a controller D-pad select a world;
  *       Enter / controller A confirms it.
  * Level (--world N): arrows walk, A jump, S throw, D switch kid. Esc quits.
@@ -69,7 +69,7 @@
 
 typedef struct {
     fa_menu    *menu;
-    fa_credits *credits;         /* non-NULL = the credits screen is up (RRR-54) */
+    fa_credits *credits;         /* non-NULL = the credits screen is up      */
     fa_hiscore *scores;          /* non-NULL = the high-score screen is up */
     int       show_scores;       /* request from the menu, handled next tick */
     int       hover;             /* menu button under the pointer, or -1 */
@@ -78,8 +78,8 @@ typedef struct {
     int       world;             /* 1..4: the world currently loaded     */
     int       in_end;            /* in the boss arena (WeltNE), not the world */
     int       end_pending;       /* recipe complete: load WeltNE next tick    */
-    int       boss_win_timer;    /* RRR-59: >0 counting down to CLASSIFICA    */
-    int       tut_reload_pending;/* RRR-54: tutorial cleared - reload as WeltN */
+    int       boss_win_timer;    /* >0 counting down to CLASSIFICA            */
+    int       tut_reload_pending;/* tutorial cleared - reload as WeltN        */
     int       want_quit;
     char      gdata[600];
 
@@ -88,12 +88,12 @@ typedef struct {
     fa_map       map;
     fa_tileset  *tiles;
     fa_entity_store *ents;
-    fa_beh      *beh;            /* RRR-51: per-ObjNr enemy behaviour       */
-    fa_hud      *hud;           /* RRR-51 AC5: score / health / ammo panel */
-    int          health;        /* RRR-51: 0x45F014, 100 max, 20 per hit   */
-    int          ammo;         /* RRR-51 AC4: 0x45ED34, snowballs 0..10   */
-    int          items[6];     /* RRR-51 AC4: 0x45EFD4, recipe-piece flags */
-    int          dirty_shot;   /* RRR-51 AC4: collect_dirtyballs was taken */
+    fa_beh      *beh;            /* per-ObjNr enemy behaviour               */
+    fa_hud      *hud;           /* score / health / ammo panel             */
+    int          health;        /* 0x45F014, 100 max, 20 per hit           */
+    int          ammo;         /* 0x45ED34, snowballs 0..10               */
+    int          items[6];     /* 0x45EFD4, recipe-piece flags            */
+    int          dirty_shot;   /* collect_dirtyballs was taken            */
     fa_camera    cam;
     fa_player pl;
     fa_player pl2;                /* co-op Milchschnitte */
@@ -105,18 +105,18 @@ typedef struct {
     int       death_player;       /* player that triggered the shared KO       */
     int       freemove;         /* P toggle: fly through the level, no clip  */
 
-    /* RRR-57: the retail exe seeds the one rand() stream from the wall clock
-     * at start-up (0x42AE27). RRR-52 shipped a fixed default for replay. Here
-     * the slice seeds the enemy RNG from time() unless --seed N pins it. */
+    /* the retail exe seeds the one rand() stream from the wall clock at
+     * start-up (0x42AE27). The slice seeds the enemy RNG from time() unless
+     * --seed N pins it. */
     uint32_t  rng_seed;
     int       rng_seed_set;
 
-    /* RRR-53: health 0 -> the run ends. fa_death times the KO hold (240) +
-     * fade (16); the level keeps running underneath. On DONE the level is
-     * torn down and the CLASSIFICA / high-score screen comes up, then the
-     * world-select menu. No in-place restart, no lives. */
+    /* health 0 -> the run ends. fa_death times the KO hold (240) + fade (16);
+     * the level keeps running underneath. On DONE the level is torn down and
+     * the CLASSIFICA / high-score screen comes up, then the world-select
+     * menu. No in-place restart, no lives. */
     fa_death  death;
-    /* solid probe ctx: terrain + the lift/block layer (RRR-50 follow-up) */
+    /* solid probe ctx: terrain + the lift/block layer */
     struct { const fa_map *map; const fa_tileset *ts; fa_entity_store *ents; } coll;
 
     fa_cs_sheet kid_sheet[2];    /* 0 = penguin, 1 = Milchschnitte */
@@ -130,7 +130,7 @@ typedef struct {
     int       chime_pos;    /* frames of chime emitted so far              */
     double    tone_phase;
 
-    fa_audio *audio;        /* RRR-46 mixer; NULL without GData / --mute   */
+    fa_audio *audio;        /* mixer; NULL without GData / --mute          */
     int       mute;         /* --mute: create no mixer                     */
     int       vol;          /* --vol 0..255, <0 = default (full)          */
     int       swap_was;     /* previous tick's FA_PST_SWAP flag            */
@@ -139,11 +139,11 @@ typedef struct {
     int       thr_was;      /* previous tick's throw_anim > 0              */
     int       glide_was;    /* previous tick's penguin glide flag         */
 
-    uint32_t  cr_act_was;   /* RRR-54: prev tick's action mask (credits skip) */
+    uint32_t  cr_act_was;   /* prev tick's action mask (credits skip)      */
     uint32_t  menu_nav_seen;/* suppress a held edge across multi-tick frames */
-    int       score;        /* RRR-50: pickups collected                   */
-    int       hurt_cd;      /* RRR-50: ticks of hit invulnerability left   */
-    int       push_was;     /* RRR-50: previous tick was shoving a block   */
+    int       score;        /* pickups collected                          */
+    int       hurt_cd;      /* ticks of hit invulnerability left          */
+    int       push_was;     /* previous tick was shoving a block          */
     int       kid_was_crouch2;
     int       kid_rise2;
     int       jump_was2;
@@ -153,7 +153,7 @@ typedef struct {
 
     /* physics-tuning overrides (px/tick), <=0 = keep the default */
     double    ov_gravity, ov_jumpvel, ov_jumpvel2, ov_runspeed, ov_airaccel;
-    /* RRR-44/45 tuning overrides (whole px), <=0 = keep the default */
+    /* camera / box tuning overrides (whole px), <=0 = keep the default */
     int       ov_bboxw, ov_bboxh, ov_camrail, ov_camband, ov_cambias;
 } slice;
 
@@ -361,7 +361,7 @@ static int slice_ladder(int px, int py, void *ctx)
     return fa_map_ladder_at((const fa_map *)ctx, px, py);
 }
 
-/* RRR-44: terrain collision class at a world pixel (0 none / 1 solid / 2
+/* terrain collision class at a world pixel (0 none / 1 solid / 2
  * one-way). Per-pixel via the decoded atlas so slopes follow their diagonal
  * (fa_render_solid_px); falls back to the coarse tile query without GData. */
 typedef struct { const fa_map *map; const fa_tileset *ts;
@@ -373,7 +373,7 @@ static int slice_terrain(int px, int py, void *ctx)
     return fa_render_solid_px(c->map, c->ts, px, py);
 }
 
-/* RRR-50: terrain OR a lift top / a pushable block, so the player stands on
+/* terrain OR a lift top / a pushable block, so the player stands on
  * rafts (fall pose fixed) and cannot walk through blocks. */
 static int slice_solid(int px, int py, void *ctx)
 {
@@ -386,14 +386,14 @@ static int slice_solid(int px, int py, void *ctx)
     return r;
 }
 
-/* RRR-50 (PL-103): a pushable block at (px,py) -> Fettalatte enters PUSH. */
+/* a pushable block at (px,py) -> Fettalatte enters PUSH. */
 static int slice_pushable(int px, int py, void *ctx)
 {
     return fa_entity_pushable_at((const fa_entity_store *)ctx, px, py);
 }
 
 /*
- * RRR-53: a HAZARD tile at world pixel (px,py). The exe (fcn.0041A290, run
+ * a HAZARD tile at world pixel (px,py). The exe (fcn.0041A290, run
  * from the player state-machine tail at 0x419DA1 every frame) queries plane 2
  * at the player origin: a non-empty cell whose attr byte has bit 0x80 set is
  * a hazard - spikes / lava / a bottom-of-pit pool. On it: play the character
@@ -401,13 +401,13 @@ static int slice_pushable(int px, int py, void *ctx)
  * i-frames; either way bounce vy = -20.0 (0x431A20 with 0xFFFEC000). Shipped
  * maps: Welt1 a SOLID band at y=2336 (the floor of the water gaps between
  * platforms), Welt2 SOLID spike tiles, Welt3/4 NON-solid lava pools. `attr &
- * 0x80` was PL-092's "alt collision" - it is the hazard flag.
+ * 0x80` is the hazard flag.
  *
  * The exe samples exactly `trunc(feet)`. `fa_collide` rests a standing kid
  * ~1 px ABOVE the solid pixel it lands on, so on the Welt1 SOLID hazard band
  * the feet can read as the empty row just above - check the feet cell AND the
  * cell a few px below (the tile the kid is standing ON), so wading in the
- * water hurts (owner playtest) while the grass platform above (no 0x80 tile)
+ * water hurts while the grass platform above (no 0x80 tile)
  * never does.
  */
 static int slice_hazard(const fa_map *m, int px, int py)
@@ -423,7 +423,7 @@ static int slice_hazard(const fa_map *m, int px, int py)
     return 0;
 }
 
-/* --- RRR-51 behaviour-layer hooks --- */
+/* --- behaviour-layer hooks --- */
 static int beh_terrain(int px, int py, void *ctx)
 {
     slice *s = (slice *)ctx;
@@ -436,7 +436,7 @@ static void beh_score(int add, void *ctx)
 }
 
 /*
- * RRR-51 AC4 - one collected DetailGroup-1 pickup. The effect is per ObjNr,
+ * one collected DetailGroup-1 pickup. The effect is per ObjNr,
  * traced from the handlers the exe installs at 0x411c18..0x411d46:
  *   48/49/50 collect_paradiso/pinguin/milchschnitte  0x40edb0  score += 100
  *   51       collect_energy                          0x40eeb0  health += 40 (cap 100)
@@ -475,16 +475,16 @@ static void beh_sfx(int ev, int obj, void *ctx)
     slice *s = (slice *)ctx;
     if (!s->audio) return;
     switch (ev) {
-        case FA_BEH_SFX_BOSS_KO_ANIM:                   /* RRR-61 robot: RBKO fr56 */
+        case FA_BEH_SFX_BOSS_KO_ANIM:                   /* robot: RBKO fr56       */
             if (obj == 14) fa_audio_event(s->audio, FA_SND_W3_BOSS_KO);
             break;
-        case FA_BEH_SFX_BOSS_LAND:                      /* RRR-60 yeti: hop land  */
+        case FA_BEH_SFX_BOSS_LAND:                      /* yeti: hop land         */
             if (obj == 9) fa_audio_event(s->audio, FA_SND_W2_BOSS_LAND);
             break;
-        case FA_BEH_SFX_BOSS_HURT:                      /* RRR-60 yeti: hit fr69  */
+        case FA_BEH_SFX_BOSS_HURT:                      /* yeti: hit fr69         */
             if (obj == 9) fa_audio_event(s->audio, FA_SND_W2_BOSS_HURT);
             break;
-        case FA_BEH_SFX_BOSS_VOICE_CUT:                 /* RRR-60 yeti: hit cuts   */
+        case FA_BEH_SFX_BOSS_VOICE_CUT:                 /* yeti: hit cuts         */
             fa_audio_stop(s->audio, FA_CH_VOICE);       /* the roar/taunt line     */
             fa_audio_stop(s->audio, FA_CH_BOSS);
             break;
@@ -503,18 +503,18 @@ static void beh_sfx(int ev, int obj, void *ctx)
             break;
         case FA_BEH_SFX_ENEMY_SHOT:            /* the throw - egg robot differs */
             fa_audio_event(s->audio,
-                obj == 14 ? FA_SND_W3_BOSS_SHOT :       /* RRR-61 robot bolt   */
-                obj == 18 ? FA_SND_W4_BOSS_SHOT :       /* RRR-62 milk particle */
+                obj == 14 ? FA_SND_W3_BOSS_SHOT :       /* robot bolt          */
+                obj == 18 ? FA_SND_W4_BOSS_SHOT :       /* milk particle       */
                 obj == 12 ? FA_SND_ENEMY_THROW_EGG : FA_SND_ENEMY_THROW);
             break;
         case FA_BEH_SFX_BOSS_CHARGE:                    /* boss wind-up cue     */
             fa_audio_event(s->audio,
-                obj == 18 ? FA_SND_W4_BOSS_DRINK        /* RRR-62 octopus slurp */
-                          : FA_SND_W3_BOSS_CHARGE);     /* RRR-61 robot wind-up */
+                obj == 18 ? FA_SND_W4_BOSS_DRINK        /* octopus slurp       */
+                          : FA_SND_W3_BOSS_CHARGE);     /* robot wind-up       */
             break;
         case FA_BEH_SFX_BOSS_HIT:
-            /* RRR-61 World 3: button push / pipe drop / the robot taking a
-             * hit each have their own w3sf cue (owner playtest). */
+            /* World 3: button push / pipe drop / the robot taking a hit each
+             * have their own w3sf cue. */
             fa_audio_event(s->audio,
                 (obj == 83 || obj == 84) ? FA_SND_W3_BUTTON :
                 obj == 85                ? FA_SND_W3_PIPE :
@@ -559,7 +559,7 @@ static int beh_voice_busy(void *ctx)
 }
 
 /*
- * RRR-54 / PL-142: the tutorial-end Kinder Paradiso (rec[+0x2A] == 7) finished
+ * the tutorial-end Kinder Paradiso (rec[+0x2A] == 7) finished
  * its pat0020 line. The exe writes tut.ini[world] = 1 (0x4159BD) and requests
  * scene 20 (0x4159C5), which reloads the world as its normal level
  * (0x4126F3: 0x4DABD4 = 0x4DAB5C, 0x45F008 = 0). Do exactly that: persist the
@@ -603,7 +603,7 @@ static void set_world_ambient(slice *s, int world)
 
 /* stop every looping / one-shot SFX lane plus the voice channels. Called on
  * any level or menu transition so ambient / proximity loops (electric floor,
- * UFO, bee, glide, boss charge) never bleed across screens (owner ask). */
+ * UFO, bee, glide, boss charge) never bleed across screens. */
 static void slice_audio_hush(slice *s)
 {
     if (!s->audio) return;
@@ -689,9 +689,9 @@ static void slice_posloops(slice *s)
 }
 
 /*
- * Spawn point (RRR-50). The level's ObjNr 1000 (misc_start.jrs) entity record
- * carries the real spawn X/Y - the exe reads it at 0x4118F5 (PL-127). Fall
- * back to the RRR-44 terrain scan when the entity layer is absent (no GData).
+ * Spawn point. The level's ObjNr 1000 (misc_start.jrs) entity record carries
+ * the real spawn X/Y - the exe reads it at 0x4118F5. Fall back to the terrain
+ * scan when the entity layer is absent (no GData).
  */
 static void find_spawn(slice *s, int *out_x, int *out_y)
 {
@@ -708,7 +708,7 @@ static void find_spawn(slice *s, int *out_x, int *out_y)
     *out_y = m->world_h - 32;
 }
 
-/* RRR-44/45: place the kid on solid ground, bind collision, frame the camera. */
+/* place the kid on solid ground, bind collision, frame the camera. */
 static void wire_level(slice *s)
 {
     int sx, sy;
@@ -740,7 +740,7 @@ static void wire_level(slice *s)
     if (s->ents)
         fa_entity_set_terrain(s->ents, slice_terrain, &s->coll);
 
-    /* RRR-51: bind the per-ObjNr enemy behaviour layer over the entity store */
+    /* bind the per-ObjNr enemy behaviour layer over the entity store */
     fa_beh_free(s->beh);
     s->beh = NULL;
     s->freemove = 0;             /* DEV: always start a level clipped */
@@ -755,7 +755,7 @@ static void wire_level(slice *s)
     s->ammo = 10;               /* 0x45ED34 init (0x4086f1) */
     s->dirty_shot = 0;
     memset(s->items, 0, sizeof s->items);
-    fa_death_init(&s->death);    /* RRR-53: clear any in-flight death sequence */
+    fa_death_init(&s->death);    /* clear any in-flight death sequence */
     if (s->ents) {
         static const fa_beh_hooks HK = { beh_terrain, beh_score, beh_sfx,
                                          beh_voice, beh_voice_busy,
@@ -763,7 +763,7 @@ static void wire_level(slice *s)
         fa_beh_hooks hk = HK;
         hk.user = s;
         s->beh = fa_beh_create(s->ents, &hk);
-        fa_beh_seed(s->beh, s->rng_seed);   /* RRR-57: clock seed / --seed N */
+        fa_beh_seed(s->beh, s->rng_seed);   /* clock seed / --seed N */
         fa_beh_set_world(s->beh, s->world);
         fa_beh_set_character(s->beh, s->pl.character & 1);
     }
@@ -786,15 +786,14 @@ static void wire_level(slice *s)
 
 /*
  * The two playable kids animate from PINGUIN.W01 / MILCHSCHNITTE.W01. The
- * per-pose frame ranges are the JR_FERRERO.exe state-machine constants
- * (RRR-43/player-anim-disasm.md, PL-096/097): each player state writes
- * {current, loop_start, inclusive_end, repeat} into the character's
- * animation record. `loop` = 1 repeats, 0 holds the last frame.
+ * per-pose frame ranges are the JR_FERRERO.exe state-machine constants: each
+ * player state writes {current, loop_start, inclusive_end, repeat} into the
+ * character's animation record. `loop` = 1 repeats, 0 holds the last frame.
  *
- * base_facing = -1: the raw art is LEFT-facing (PL-099); the engine mirrors
- * it for a right-facing player. Advance rate = one frame per 2 ticks
- * (period 2 -> 30 fps, PL-098). The WESTKA sidecars are NOT used for
- * selection - several of their ranges disagree with the engine.
+ * base_facing = -1: the raw art is LEFT-facing; the engine mirrors it for a
+ * right-facing player. Advance rate = one frame per 2 ticks (30 fps). The
+ * WESTKA sidecars are NOT used for selection - several of their ranges
+ * disagree with the engine.
  */
 typedef struct { fa_cs_pose pose; int cur, loop_first, end, loop; } kid_clip;
 
@@ -806,7 +805,7 @@ static const kid_clip PENGUIN_CLIPS[] = {
     { FA_CS_CROUCH,     136, 136, 143, 0 },  /* state 8/9  down: hold at 143 */
     { FA_CS_CROUCH_RISE,144, 144, 149, 0 },  /* state 9 release: 144..149 once */
     { FA_CS_GLIDE,      287, 287, 287, 0 },  /* state 10/11 - a single frame */
-    { FA_CS_CLIMB,      124, 124, 135, 1 },  /* state 12/13 (PL-102) */
+    { FA_CS_CLIMB,      124, 124, 135, 1 },  /* state 12/13 */
     { FA_CS_THROW_FWD,  233, 233, 260, 0 },  /* state 14/15 snowball (spawn f255) */
     { FA_CS_THROW_UP,   233, 233, 260, 0 },  /* same range; only trajectory differs */
     { FA_CS_KO,         150, 158, 162, 1 },  /* state 34/35 */
@@ -823,8 +822,8 @@ static const kid_clip MILCH_CLIPS[] = {
     { FA_CS_CROUCH,     259, 259, 266, 0 },  /* state 24/25 down */
     { FA_CS_CROUCH_RISE,267, 267, 272, 0 },  /* state 25 release */
     /* no glide state for Milch - GLIDE stays unbound (falls back to FALL)   */
-    { FA_CS_CLIMB,       24,  24,  35, 1 },  /* state 28/29 (PL-102) */
-    { FA_CS_PUSH,       172, 172, 190, 1 },  /* state 32/33 (PL-103) */
+    { FA_CS_CLIMB,       24,  24,  35, 1 },  /* state 28/29 */
+    { FA_CS_PUSH,       172, 172, 190, 1 },  /* state 32/33 */
     { FA_CS_THROW_FWD,  273, 273, 296, 0 },  /* state 30/31 snowball (spawn f291) */
     { FA_CS_THROW_UP,   273, 273, 296, 0 },
     { FA_CS_KO,          36,  44,  48, 1 },  /* state 36/37 */
@@ -853,7 +852,7 @@ static void load_kids(slice *s)
             return;
         }
         fa_cs_anim_init(&s->kid_anim[k], &s->kid_sheet[k]);
-        fa_cs_anim_set_period(&s->kid_anim[k], 2);   /* PL-098: 30 fps */
+        fa_cs_anim_set_period(&s->kid_anim[k], 2);   /* 30 fps */
     }
     bind_kid(&s->kid_anim[0], PENGUIN_CLIPS,
              (int)(sizeof PENGUIN_CLIPS / sizeof *PENGUIN_CLIPS));
@@ -958,10 +957,10 @@ static void slice_update_kid_anim(slice *s, fa_player *p, int k,
 }
 
 /*
- * RRR-54 / PL-142: has this world's tutorial been cleared? The exe reads byte
- * world-1 of GData\Save\tut.ini (4 raw bytes) at level load; a 0 byte means
- * "play WeltNt". Missing file -> every tutorial shows. fa_vfs classifies
- * tut.ini to the install dir beside GData (RRR-39).
+ * has this world's tutorial been cleared? The exe reads byte world-1 of
+ * GData\Save\tut.ini (4 raw bytes) at level load; a 0 byte means "play
+ * WeltNt". Missing file -> every tutorial shows. fa_vfs classifies tut.ini to
+ * the install dir beside GData.
  */
 static int slice_tut_seen(const char *gdata, int world)
 {
@@ -1050,7 +1049,7 @@ static void enter_end(slice *s)
 }
 
 /*
- * RRR-53: the run is over (health hit 0, fa_death's 240-tick KO hold + 16-tick
+ * the run is over (health hit 0, fa_death's 240-tick KO hold + 16-tick
  * fade have elapsed). The exe (0x41272D -> scene 15, 0x402DE4) plays Start.wav
  * and shows the CLASSIFICA / high-score screen for the world that was played,
  * with the run's score, then the world-select menu. There is no in-place
@@ -1172,7 +1171,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
     }
     if (s->end_pending) { enter_end(s); return; }
 
-    /* RRR-54: the tutorial's last Kinder Paradiso finished its line - reload
+    /* the tutorial's last Kinder Paradiso finished its line - reload
      * the same world as the normal level (tut.ini is already written). The
      * exe (0x4126F3) keeps the score across this reload. */
     if (s->tut_reload_pending) {
@@ -1183,7 +1182,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
         return;
     }
 
-    /* RRR-54: the credits screen. Credit1..4.bmp in order, then ENDTITLES,
+    /* the credits screen. Credit1..4.bmp in order, then ENDTITLES,
      * then the menu. A page auto-advances after FA_CREDITS_PAGE_DWELL ticks;
      * a click or a JUMP/FIRE press skips to the next page at once (the exe
      * folds the same input into 0x4DAB44). */
@@ -1231,9 +1230,9 @@ static void s_sim(uint64_t tick, const void *input, void *user)
         fa_hiscore_tick(s->scores, &hi, &he);
 
         if (he.hover_sound && s->audio)
-            fa_audio_event(s->audio, FA_SND_MENU_HOVER);   /* alsf08 (PL-118) */
+            fa_audio_event(s->audio, FA_SND_MENU_HOVER);   /* alsf08 */
 
-        if (he.wrote)   /* fa_hiscore persisted user:Highscore{n}.dat (RRR-39) */
+        if (he.wrote)   /* fa_hiscore persisted user:Highscore{n}.dat */
             printf("high score entered -> Highscore%d.dat\n", he.wrote_world + 1);
 
         if (he.leave) {
@@ -1263,7 +1262,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                 i == focus ? (held ? FA_MENU_PRESS : FA_MENU_HOVER)
                           : FA_MENU_REST);
         if (s->audio && focus >= 0 && focus != s->hover)
-            fa_audio_event(s->audio, FA_SND_MENU_HOVER);   /* alsf08 (PL-118) */
+            fa_audio_event(s->audio, FA_SND_MENU_HOVER);   /* alsf08 */
         s->hover = focus;
         int confirm = (mouse_click && pick >= 0) ||
                       (fi->pad_pressed & (1u << FA_PAD_A)) != 0 ||
@@ -1313,7 +1312,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             printf("skip -> Welt%dE boss arena\n", s->world);
         }
 
-        /* RRR-53: the kid is dead. The run is over - but the LEVEL KEEPS
+        /* the kid is dead. The run is over - but the LEVEL KEEPS
          * RUNNING for the 240-tick KO hold (exe case 1 / 0x41110B loops the
          * whole entity table with no death guard), then a 16-tick fade, then
          * the CLASSIFICA screen + the menu (begin_after_death). The player is
@@ -1353,9 +1352,9 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             return;
         }
 
-        /* RRR-59: the boss is down, its 7th recipe piece dropped, and the
-         * player has caught it (fa_beh beh_i7). The level is complete -
-         * to the CLASSIFICA / high-score screen (owner decision). */
+        /* the boss is down, its 7th recipe piece dropped, and the player has
+         * caught it (fa_beh beh_i7). The level is complete - to the
+         * CLASSIFICA / high-score screen. */
         if (s->in_end && s->beh && fa_beh_recipe_done(s->beh)) {
             if (s->audio) fa_audio_event(s->audio, FA_SND_PICKUP);
             printf("World %d complete (score %d) -> CLASSIFICA\n",
@@ -1364,7 +1363,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             return;
         }
 
-        /* RRR-50: tick the object runtime FIRST so the player's collision
+        /* tick the object runtime FIRST so the player's collision
          * probe sees lifts / blocks / fallers at their new positions this
          * tick (fixes the raft fall-pose and lets blocks stay solid). */
         slice_beh_begin(s);
@@ -1374,7 +1373,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
         /* PRE-tick: if the kid rides a platform, plant his feet on the
          * (now-moved) deck so fa_player_tick's own collision grounds him
          * THIS tick - otherwise crouch / throw (gated on the post-collide
-         * on_ground) fail while the platform moves (owner playtest). */
+         * on_ground) fail while the platform moves. */
         int on_lift = 0, lift_top = 0, lift_dx = 0;
         int on_lift2 = 0, lift_top2 = 0, lift_dx2 = 0;
         if (!s->freemove && s->ents && s->pl.vy >= 0 && s->pl.state != FA_PST_JUMP) {
@@ -1453,12 +1452,12 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                 if (s->ammo <= 0) m2 &= ~(1u << FA_ACT_FIRE);
                 fa_player_tick(&s->pl2, m2);
             }
-            /* co-op: only player 1 plays idle fidgets (owner decision). */
+            /* co-op: only player 1 plays idle fidgets. */
             s->pl2.idle_kind = s->pl2.idle_play = s->pl2.idle_sound = 0;
             s->pl2.idle_timer = s->pl2.t.idle_delay;
         }
         /* the swap voice line starts when the swap starts; the swap lock
-         * length is that line's duration (PL-104). */
+         * length is that line's duration. */
         int swap_now  = (s->pl.state == FA_PST_SWAP);
         int jump_now  = (s->pl.state == FA_PST_JUMP);
         int thr_now   = (s->pl.throw_anim > 0);
@@ -1473,8 +1472,8 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                                                  : FA_SND_SWAP_M2P);
             /* alsf01 only on a REAL jump (jump_hold is set by the input-edge
              * jump). A hit / hazard knockback also puts the kid in JUMP state
-             * but must not play the jump sound (owner: "plays the jump sound
-             * when hurt") - the hit sound below owns that moment. */
+             * but must not play the jump sound - the hit sound below owns
+             * that moment. */
             if (jump_now && !s->jump_was && s->pl.jump_hold > 0)
                 fa_audio_event(s->audio, c1 ? FA_SND_JUMP_M : FA_SND_JUMP_P);
             if (thr_now && !s->thr_was)
@@ -1516,7 +1515,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
         s->thr_was2  = thr_now2;
         s->glide_was2 = glide_now2;
 
-        /* --- RRR-50: player <-> object coupling --- */
+        /* --- player <-> object coupling --- */
         if (s->ents) {
             int px = fa_player_px(&s->pl), py = fa_player_py(&s->pl);
             int face = (s->pl.facing == FA_FACE_RIGHT) ? 1 : -1;
@@ -1526,17 +1525,21 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             /* the pickup / hit test spans the kid's whole sprite plus the
              * overhead reach (items sit in tree-tops and along the vines;
              * the exe collects during the climb too) - not the narrow 10 px
-             * collision core (owner playtest) */
-            int gw  = s->pl.t.body_hw + 26;              /* ~72 px wide     */
-            int gcy = py - s->pl.t.body_h;               /* head-ish centre */
-            int gh  = s->pl.t.body_h + 10;               /* reach overhead  */
+             * collision core */
+            /* full-sprite AABB, same dims the enemy layer uses for the kid
+             * (slice_beh_begin: half_w 40, height 190 / crouch 100). body_h
+             * is a ~44 px collision core - far shorter than the drawn sprite,
+             * so a head-height item never entered the old box. */
+            int pfull = (s->pl.state == FA_PST_CROUCH) ? 100 : 190;
+            int gw  = 40;
+            int gcy = py - pfull / 2;
+            int gh  = pfull / 2 + 10;                    /* +10 overhead reach */
 
-            /* Fettalatte shoving a block (PL-135): a committed clip; on its
+            /* Fettalatte shoving a block: a committed clip; on its
              * frame-176 event (~tick 8) one impulse sets the block's float
              * vx to +/-7.0 and beh_block slides + friction-decays it. The
              * kid does NOT ride the block - the shove ends the clip, then the
-             * player must walk up to the block again to shove it once more
-             * (owner request). */
+             * player must walk up to the block again to shove it once more. */
             if (s->pl.state == FA_PST_PUSH && s->beh) {
                 int probx = px + face * (s->pl.t.body_hw + 8);
                 if (s->pl.push_timer == 8 &&
@@ -1571,12 +1574,13 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                     s->pl2.state = (s->pl2.vx != 0) ? FA_PST_WALK : FA_PST_STAND;
             }
 
-            /* collect BONUS / POWERUP pickups (PL-131) */
+            /* collect BONUS / POWERUP pickups */
             int got = fa_entity_collect(s->ents, px, gcy, gw, gh, beh_pickup, s);
             if (s->coop) {
-                int gw2 = s->pl2.t.body_hw + 26;
-                int gcy2 = py2 - s->pl2.t.body_h;
-                int gh2 = s->pl2.t.body_h + 10;
+                int pfull2 = (s->pl2.state == FA_PST_CROUCH) ? 100 : 190;
+                int gw2 = 40;
+                int gcy2 = py2 - pfull2 / 2;
+                int gh2 = pfull2 / 2 + 10;
                 got += fa_entity_collect(s->ents, px2, gcy2, gw2, gh2,
                                          beh_pickup, s);
             }
@@ -1592,7 +1596,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                 }
             }
 
-            /* RRR-51: enemy contact + enemy projectiles. No stomp - falling
+            /* enemy contact + enemy projectiles. No stomp - falling
              * onto an enemy is the same 20-damage overlap (0x41A3E0 never
              * reads player vy); only the 120-tick i-frames suppress it. */
             int kb = 0;
@@ -1609,13 +1613,17 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                     hit->on_ground = 0;
                 }
                 s->death_player = hit_player;
-                if (s->audio)
-                    fa_audio_event(s->audio, hit_player
+                if (s->audio) {
+                    /* the hit sound follows the CHARACTER, not the pad slot:
+                     * Milchschnitte -> ms0007, Penguin -> pi0005. */
+                    int ms = hit_player ? 1 : (s->pl.character & 1);
+                    fa_audio_event(s->audio, ms
                                    ? FA_SND_HIT_M : FA_SND_HIT_P);
+                }
                 printf("hit! health %d\n", s->health);
             }
 
-            /* RRR-53 (fcn.0041A290): standing on a plane-2 hazard tile
+            /* (fcn.0041A290) standing on a plane-2 hazard tile
              * (attr & 0x80) deals 20 + 120 i-frames when not already in
              * i-frames, plays the character hit sound, and ALWAYS bounces
              * the kid up (vy = -20.0) so he cannot sit in it. */
@@ -1630,9 +1638,11 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                     s->health -= 20;
                     s->hurt_cd = 120;
                     s->death_player = hazard0 ? 0 : 1;
-                    if (s->audio)
-                        fa_audio_event(s->audio, hazard0
-                                       ? FA_SND_HIT_P : FA_SND_HIT_M);
+                    if (s->audio) {
+                        int ms = hazard0 ? (s->pl.character & 1) : 1;
+                        fa_audio_event(s->audio, ms
+                                       ? FA_SND_HIT_M : FA_SND_HIT_P);
+                    }
                     printf("hazard! health %d\n", s->health);
                 }
                 if (hazard0) {
@@ -1646,7 +1656,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             }
             if (s->hurt_cd > 0) s->hurt_cd--;
 
-            /* RRR-59: the boss is down - its 7th recipe piece drops in
+            /* the boss is down - its 7th recipe piece drops in
              * (fa_beh beh_i7); catch it to finish the level. */
             if (s->in_end && s->beh && fa_beh_boss_defeated(s->beh) &&
                 !s->boss_win_timer) {
@@ -1655,7 +1665,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                        "7th recipe piece\n", s->world, s->score);
             }
 
-            /* RRR-53: health hit 0 -> the run is over. Start the KO sequence
+            /* health hit 0 -> the run is over. Start the KO sequence
              * (exe 0x417419: player state -> KO, 0x4E0B44 = 0xF0). The exe
              * launches the body once (0x431A00/0x431A20: vx +/-18, vy -6, in
              * 20.12 -> px/tick); the shared integrator then arcs + lands it.
@@ -1696,7 +1706,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
     else { s->cam.x += vx; s->cam.y += vy; }
 }
 
-/* RRR-55: the exe installs the player renderer (0x41A780) as the PLANE 2
+/* the exe installs the player renderer (0x41A780) as the PLANE 2
  * per-plane hook (0x417150 -> 0x432820(2, ...)), so the kid + thrown
  * snowballs draw mid-scene - AFTER plane-2 tiles and band-0 entities, and
  * BEFORE plane-2 band-2 entities and the foreground tile planes 3/4. That
@@ -1710,7 +1720,7 @@ static void slice_draw_player(slice *s, const fa_surface *dst,
     int px = fa_player_px(p) - cam->x;
     int py = fa_player_py(p) - cam->y;
     long drawn = -1;
-    /* RRR-53: blink the kid through the i-frame window - hidden on
+    /* blink the kid through the i-frame window - hidden on
      * alternate ~7 px of the countdown. Not while dying. */
     if (s->have_kids && !blink)
         drawn = fa_cs_anim_draw(&s->kid_anim[k], dst, px, py, NULL);
@@ -1781,7 +1791,7 @@ static void s_render(double alpha, uint16_t *fb, int w, int h, size_t pitch,
 
     if (s->have_map) {
         fa_scene sc = { &s->bg, &s->map, s->tiles, s->ents, s->grid, NULL, NULL };
-        sc.on_plane = slice_plane_hook;   /* RRR-55: kid + snowballs at plane 2 */
+        sc.on_plane = slice_plane_hook;   /* kid + snowballs at plane 2 */
         sc.on_plane_ud = s;
         fa_render_scene(&dst, &sc, &s->cam);
         if (s->use_player) {
@@ -1801,8 +1811,8 @@ static void s_render(double alpha, uint16_t *fb, int w, int h, size_t pitch,
                     case 12: pf = 23; break;
                     case 15: pf = 53; break;
                     case 10: pf = 87; break;
-                    case 14: pf = 188; break;   /* robot boss bolt (RRR-61) */
-                    case 18: pf = 50; break;    /* octopus milk particle (RRR-62) */
+                    case 14: pf = 188; break;   /* robot boss bolt */
+                    case 18: pf = 50; break;    /* octopus milk particle */
                     default: pf = -1; break;
                 }
                 const fa_w01 *pw = (pf >= 0 && s->ents)
@@ -1812,7 +1822,7 @@ static void s_render(double alpha, uint16_t *fb, int w, int h, size_t pitch,
                     fa_fill(&dst, &b, NULL, fa_rgb565(150, 90, 40));
                 }
             }
-            /* RRR-51 AC5 + RRR-59: the status panel over the scene. In the
+            /* the status panel over the scene. In the
              * boss arena (exe hud_draw 0x408B9B, flag 0x45ECBC) the boss bar
              * REPLACES the 6 recipe-piece icons - BossInterface frame + a
              * Boss/Energy fill by HP + a Bosspics portrait. -1 boss_hp = the
@@ -1824,9 +1834,9 @@ static void s_render(double alpha, uint16_t *fb, int w, int h, size_t pitch,
                               s->coop ? 0 : s->pl.character,
                               boss_hp, s->world - 1);
 
-            /* RRR-53: the end-of-run fade (exe 0x45ED42 = 0x10, step 1). No
-             * alpha blend on fa_surface, so a 16-step screen-door dissolve to
-             * black - the exe's fades are dither (RRR-6). fade counts 16 -> 0;
+            /* the end-of-run fade (exe 0x45ED42 = 0x10, step 1). No alpha
+             * blend on fa_surface, so a 16-step screen-door dissolve to
+             * black - the exe's fades are dither. fade counts 16 -> 0;
              * row y goes black once (y & 15) >= fade. */
             int fade = fa_death_fade_amount(&s->death);
             if (fade > 0 && fade < FA_DEATH_FADE_TICKS) {
@@ -1855,7 +1865,7 @@ static int s_audio(int16_t *buf, int max_frames, int rate, int channels,
     slice *s = (slice *)user;
     if (rate <= 0 || channels <= 0) return 0;
 
-    /* RRR-46: with GData the real mixer owns the buffer (music + SFX + voice).
+    /* with GData the real mixer owns the buffer (music + SFX + voice).
      * The 440 Hz tone is only the no-GData dev aid. */
     if (s->audio && channels == 2) {
         if (max_frames > 4096) max_frames = 4096;
@@ -2002,7 +2012,7 @@ int main(int argc, char **argv)
     int win_scale = 0, fullscreen = 0, crisp = 0;
     double ov_g = 0, ov_j = 0, ov_j2 = 0, ov_r = 0, ov_a = 0;
     int ov_bw = 0, ov_bh = 0, ov_crail = 0, ov_cband = 0, ov_cb = 0;
-    long seed_arg = -1;              /* RRR-57: >=0 pins the enemy RNG seed */
+    long seed_arg = -1;              /* >=0 pins the enemy RNG seed */
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--frames") && i + 1 < argc)
@@ -2012,7 +2022,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--world") && i + 1 < argc)
             world = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--tut"))    tut = 1;
-        else if (!strcmp(argv[i], "--credits")) show_credits = 1;  /* RRR-54 */
+        else if (!strcmp(argv[i], "--credits")) show_credits = 1;
         else if (!strcmp(argv[i], "--end"))    end = 1;   /* boot into WeltNE */
         else if (!strcmp(argv[i], "--grid"))   grid = 1;
         else if (!strcmp(argv[i], "--tone"))   tone = 1;
@@ -2098,11 +2108,11 @@ int main(int argc, char **argv)
                s.gdata, sizeof s.gdata);
     char *gdata = s.gdata;
 
-    /* RRR-46: the mixer needs the DIRECT GDATA LOADER (RRR-33). */
+    /* the mixer needs the GData directory. */
     if (!mute && dir_has_gdata(gdata)) {
         s.audio = fa_audio_create(gdata);
         if (s.audio) {
-            /* shipped Option.ini defaults: music 75, sound 100 (PL-119) */
+            /* shipped Option.ini defaults: music 75, sound 100 */
             fa_audio_set_music_volume_ini(s.audio, 75);
             fa_audio_set_sfx_volume_ini(s.audio, 100);
             if (vol >= 0) fa_audio_set_master(s.audio, vol);

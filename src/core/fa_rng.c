@@ -1,5 +1,5 @@
 /*
- * fa_rng.c - the game's PRNG (RRR-52). See fa_rng.h.
+ * fa_rng.c - the game's PRNG. See fa_rng.h.
  *
  * Exact port of JR_FERRERO.exe rand/srand (fcn @0x4395B0 / @0x4395A6):
  * the stock MSVC linear congruential generator.

@@ -1,8 +1,7 @@
 /*
- * fa_beh.c - per-ObjNr enemy behaviour layer (RRR-51). See fa_beh.h.
+ * fa_beh.c - per-ObjNr enemy behaviour layer. See fa_beh.h.
  *
- * Rewritten from the raw disassembly (jr_disasm.txt) after the first
- * parametrised pass diverged from the oracle. Every constant and state
+ * Written from the raw disassembly (jr_disasm.txt). Every constant and state
  * transition below is traced to a handler in the exe:
  *
  *   papagei  0x415FF0   adler   0x40A700   biene   0x40BBA0   (dive family)
@@ -45,10 +44,10 @@
 #define FX_0_07 4588      /* 0.07 (octopus flat milk-particle grav, 0x40D0BF) */
 #define FX_0_5  32768     /* 0.5  (flat-coconut reflect vy, 0x40C331)      */
 #define FX_9_0  589824    /* 9.0  (reflected coconut speed, 0x40C318)      */
-#define FX_0_4  26214     /* 0.4  (RRR-61 pipe-drop gravity, 0x452294)  */
-#define FX_0_6  39322     /* 0.6  (gravity, PL-087)  */
-#define FX_7_0  458752    /* 7.0  (shove impulse, PL-135)     */
-#define FX_20_0 1310720   /* terminal fall (PL-087 / 0x452250) */
+#define FX_0_4  26214     /* 0.4  (pipe-drop gravity, 0x452294)  */
+#define FX_0_6  39322     /* 0.6  (gravity)  */
+#define FX_7_0  458752    /* 7.0  (shove impulse)     */
+#define FX_20_0 1310720   /* terminal fall (0x452250) */
 /* FX_2_0 (block gravity, 0x452288) is defined above. */
 
 static int fx_round(int32_t v)
@@ -77,8 +76,8 @@ enum {
     BS_KT,       /* launched-death / freeze timer                            */
     BS_AF,       /* per-loop "threw this loop already" latch / misc          */
     BS_INIT,     /* 0 until the init state has run                           */
-    BS_RNG       /* reserved (was a per-record RNG; RRR-52 moved the draws to
-                  * the shared fa_rng stream, mirroring the exe's one stream) */
+    BS_RNG       /* reserved (the draws moved to the shared fa_rng stream,
+                  * mirroring the exe's one stream) */
 };
 
 /* --- enemy descriptor -------------------------------------------- */
@@ -137,8 +136,8 @@ typedef struct {
     int     life;
     int     owner_obj;      /* the throwing enemy's ObjNr - the exe draws
                              * the projectile from that sheet (0x40AF80)  */
-    int     reflected;      /* RRR-59: a player snowball turned this boss
-                             * coconut back toward the boss (0x40C2C0)     */
+    int     reflected;      /* a player snowball turned this boss coconut
+                             * back toward the boss (0x40C2C0)             */
 } bproj;
 
 struct fa_beh {
@@ -157,22 +156,22 @@ struct fa_beh {
 
     bproj proj[FA_BEH_MAX_PROJ];
     int   boss_hp;
-    int   boss_defeated;               /* RRR-59: the gorilla KO has fired    */
-    int   recipe_done;                 /* RRR-59: the 7th piece (i7) was taken */
+    int   boss_defeated;               /* the gorilla KO has fired            */
+    int   recipe_done;                 /* the 7th piece (i7) was taken        */
     int   world;                       /* 1..4, for the Paradiso level cue  */
     int   ammo_dirty;                  /* 1 = "dirty" (black) snowballs, ds:0x4E1044.
-                                        * RRR-60: only these hurt the yeti boss. */
-    int   ib_phase;                    /* RRR-60 yeti<->ice-block handshake, ds:0x4E0B24:
+                                        * Only these hurt the yeti boss.     */
+    int   ib_phase;                    /* yeti<->ice-block handshake, ds:0x4E0B24:
                                         * 1 block ready, 2 kick fired, 3 slide done, 0 rearm */
-    int   icicle_mask;                 /* RRR-60 yeti->icicle trigger bitfield, ds:0x4E0B20 */
+    int   icicle_mask;                 /* yeti->icicle trigger bitfield, ds:0x4E0B20 */
 
-    /* RRR-61 World-3 robot boss: 3 buttons (ObjNr 83) on the left of the
+    /* World-3 robot boss: 3 buttons (ObjNr 83) on the left of the
      * arena; push all 3 -> the pipe (ObjNr 85) drops onto the robot -> hit,
      * then the buttons reset. ds:0x4E0B2C is the exe's 3-byte flag array. */
     int   rb_btn[3];                   /* 1 = that button is pushed and held  */
     int   rb_pipe;                     /* 0 parked, 1 dropping                 */
 
-    fa_rng rng;                        /* RRR-52: the shared enemy RNG stream */
+    fa_rng rng;                        /* the shared enemy RNG stream         */
 
     int   pending_dmg[FA_BEH_MAX_PLAYERS];
     int   pending_kb[FA_BEH_MAX_PLAYERS];
@@ -181,7 +180,7 @@ struct fa_beh {
 /* ---- helpers --------------------------------------------------- */
 
 /*
- * RRR-52: every random enemy timer draws from the behaviour layer's single
+ * every random enemy timer draws from the behaviour layer's single
  * fa_rng stream (the exe's rand(), fcn @0x4395B0), reduced with `% n` exactly
  * as the handlers do. `brand(b, n)` == the exe's `rand() % n`.
  */
@@ -190,7 +189,7 @@ static int brand(fa_beh *b, int n)
     return fa_rng_below(&b->rng, n);
 }
 
-/* RRR-59: the gorilla boss voice lines (0x40C4E0 / 0x40CC48 -> strings at
+/* the gorilla boss voice lines (0x40C4E0 / 0x40CC48 -> strings at
  * 0x455E28..0x455D74). GB0002 intro/roar, GB0003 alt roar, GB0008..GB0011
  * the four random on-hit taunts. Streamed on the Paradiso voice lane. */
 #define GB_INTRO "SDat/voices/ita/GB0002.wav"
@@ -201,7 +200,7 @@ static const char *GB_TAUNT[4] = { "SDat/voices/ita/GB0008.wav",
                                    "SDat/voices/ita/GB0010.wav",
                                    "SDat/voices/ita/GB0011.wav" };
 
-/* RRR-60: the World-2 yeti boss voice lines (0x40E350 -> strings at
+/* the World-2 yeti boss voice lines (0x40E350 -> strings at
  * 0x4561D0 / 0x456188 / 0x4561AC / 0x456164..0x4560D4). YB0001 intro,
  * YB0002/3 the two roars, YB0004..YB0008 the five on-hit taunts. */
 #define YB_INTRO "SDat/voices/ita/YB0001.wav"
@@ -213,7 +212,7 @@ static const char *YB_TAUNT[5] = { "SDat/voices/ita/YB0004.wav",
                                    "SDat/voices/ita/YB0007.wav",
                                    "SDat/voices/ita/YB0008.wav" };
 
-/* RRR-61: the World-3 robot boss voice lines (0x40D6B0 -> strings at
+/* the World-3 robot boss voice lines (0x40D6B0 -> strings at
  * 0x45608C / 0x456068 / 0x456044 / 0x456020 / 0x455FFC / 0x455FD8 /
  * 0x455FB4 / 0x455F90). rb0003 intro; rb0011/2/8/1/13 the taunt roll
  * (state 40); rb0010 (state 41); rb0004 the on-hit reaction. */
@@ -226,7 +225,7 @@ static const char *RB_TAUNT[5] = { "SDat/voices/ita/rb0011.wav",
                                    "SDat/voices/ita/rb0001.wav",
                                    "SDat/voices/ita/rb0013.wav" };
 
-/* RRR-62: the World-4 octopus (KRAKE) boss voice lines (0x40CD70 -> strings at
+/* the World-4 octopus (KRAKE) boss voice lines (0x40CD70 -> strings at
  * 0x455F6C / 0x455F48 / 0x455F24 / 0x455EB8 / 0x455EDC / 0x455F00 / 0x455E70 /
  * 0x455E94 / 0x455E4C). ob0001 intro; ob0004 a snowball registered; ob0002/3
  * the on-hit taunts (state 101); ob0007 the calm shoot-end line; ob0008/9/13
@@ -244,7 +243,7 @@ static const char *OB_SHOTAT[3]   = { "SDat/voices/ita/ob0008.wav",
                                       "SDat/voices/ita/ob0009.wav",
                                       "SDat/voices/ita/ob0013.wav" };
 
-/* RRR-60: when the yeti lands from a hop it sets ds:0x4E0B20 to one of these
+/* when the yeti lands from a hop it sets ds:0x4E0B20 to one of these
  * 6-bit patterns (exe table 0x4560B0, rand()%9); every ceiling icicle (ObjNr
  * 79) whose rec[+0x2A] bit is set then falls. */
 static const int ICICLE_PAT[9] =
@@ -301,8 +300,8 @@ static void select_player(fa_beh *b, int ex, int ey)
     b->snow_max = p->snow_max;
 }
 
-/* RRR-61: the robot boss aim lane. The exe (0x40D7B7) buckets the player's
- * SCREEN x at 0x120 / 0x240, but the owner prefers our own read: the lane is
+/* the robot boss aim lane. The exe (0x40D7B7) buckets the player's SCREEN x
+ * at 0x120 / 0x240; the port prefers its own read: the lane is
  * the wall button (ObjNr 83) whose frame-box centre Y is nearest the kid's
  * feet. Buttons are stacked (idx 0 low .. 2 high), so the bolt - through the
  * fixed exe vy table {+10, 0, -8} - tracks the button the kid stands at. */
@@ -324,7 +323,7 @@ static int rb_lane(const fa_beh *b)
     return best;
 }
 
-/* RRR-59: the live boss record (ObjNr 9/10/14/18), or NULL. */
+/* the live boss record (ObjNr 9/10/14/18), or NULL. */
 static fa_entity_rec *boss_rec(fa_beh *b)
 {
     int c = fa_entity_count(b->store);
@@ -372,9 +371,9 @@ static int nearest_contact_player(fa_beh *b, int ex0, int ey0,
 
 /*
  * The enemy's contact / vulnerability box = the FULL rendered sprite AABB
- * (RRR-51 owner playtest: "the hitbox should be the entire sprite"). The
- * disassembly's tighter per-enemy sub-boxes (kong X+40,Y+20,120,190 etc.)
- * are not what the oracle shows on screen. fa_entity_frame_box is now the
+ * ("the hitbox should be the entire sprite"). The disassembly's tighter
+ * per-enemy sub-boxes (kong X+40,Y+20,120,190 etc.) are not what shows on
+ * screen. fa_entity_frame_box is now the
  * exe-exact placed-object box (frame-0-normalised table A + ReferenceSprWidth
  * mirror; see ent_frame_box), so the sprite and this box coincide.
  */
@@ -390,9 +389,9 @@ static void enemy_box(fa_beh *b, int idx, const fa_entity_rec *e,
     /* Flying enemies (dive family + flying robot): on the attack / dive
      * frames the per-frame sprite AABB balloons well past the body (wings and
      * beak spread, the dive pose stretches), so a raw-AABB contact box drifts
-     * off the visible enemy - the "disjointed hitbox" the owner reported.
+     * off the visible enemy (a disjointed hitbox).
      * Intersect the AABB with the exe's fixed class box, anchored at the
-     * record origin (enemy-render-and-hit-disasm.md Q3). The result can never
+     * record origin. The result can never
      * be larger than the drawn sprite and never detaches from it, in every
      * state including the attack. */
     if (d && (d->kind == K_DIVE || d->kind == K_FLYROBOT)) {
@@ -447,7 +446,7 @@ static void spawn_proj(fa_beh *b, int owner_obj, int wx, int wy,
         b->proj[i].grav = grav;
         b->proj[i].life = life;
         b->proj[i].owner_obj = owner_obj;
-        b->proj[i].reflected = 0;          /* RRR-59: clear a reused slot     */
+        b->proj[i].reflected = 0;          /* clear a reused slot             */
         if (b->h.sfx) b->h.sfx(FA_BEH_SFX_ENEMY_SHOT, owner_obj, b->h.user);
         return;
     }
@@ -560,7 +559,7 @@ static int attack_gate(fa_beh *b, fa_entity_rec *e, const edesc *d)
 }
 
 /* ================================================================
- * pushable block  (fcn.00414E50, ObjNr 76/78/86/87 - PL-135)
+ * pushable block  (fcn.00414E50, ObjNr 76/78/86/87)
  * ================================================================ */
 
 static const int BLOCK_OBJ[] = { 76, 78, 86, 87 };
@@ -758,8 +757,16 @@ static int beh_paradiso(fa_entity_rec *e, int wrapped, void *ctx)
         /* the exe's tight rec.Y + [-30, +100] band assumes a walk surface
          * near the sprite top; not true for every placement, so trigger on
          * the whole sprite AABB + a wide downward skirt. */
-        if (b->px <= x0 - 150 || b->px >= x1 + 150) return 0;
-        if (b->py <= y0 - 150 || b->py >= y1 + 250) return 0;
+        if (tut) {
+            if (b->px <= x0 - 150 || b->px >= x1 + 150) return 0;
+            if (b->py <= y0 - 150 || b->py >= y1 + 250) return 0;
+        } else {
+            /* Kinder Paradiso levels: fire only on real contact with the
+             * mascot sprite, not on proximity. `m` = the kid's half-width. */
+            const int m = 20;
+            if (b->px <= x0 - m || b->px >= x1 + m) return 0;
+            if (b->py <= y0 - m || b->py >= y1 + m) return 0;
+        }
 
         if (tut) {
             const char *wav = pat_seq((unsigned char)e->raw[0x2a], 0, b->pchar);
@@ -930,7 +937,7 @@ static int beh_broesel(fa_entity_rec *e, int wrapped, void *ctx)
 }
 
 /*
- * RRR-60: the yeti's in-place hop (exe state 5 / 100, 0x40E64F..0x40E717).
+ * the yeti's in-place hop (exe state 5 / 100, 0x40E64F..0x40E717).
  * On animation frame 88 it launches vy = -12.0; gravity +0.6, terminal +20.0;
  * it lands back on the Y it left from (bs[BS_KT]). It never moves in X. While
  * airborne it holds the last hop frame (the exe syncs the clip to the physics
@@ -962,7 +969,7 @@ static int yeti_hop(fa_entity_rec *e)
     return 0;
 }
 
-/* RRR-60: the yeti landed - play the thud (exe 0x40E6BE: ds:0x4E0AA4 on
+/* the yeti landed - play the thud (exe 0x40E6BE: ds:0x4E0AA4 on
  * channel 9), trigger the ceiling icicles (0x40E6D4) and re-arm the ice
  * block (0x40E6F6). Fires on every hop landing - the idle hop and the
  * hit-recoil jump both run this block. */
@@ -995,9 +1002,7 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
         e->bs[BS_VY] = 0;
         /* the exe inits rec[+0x78] = rec[+0x74] = 0 (kong 0x413D24, parrot
          * 0x416056): state 1's timer hits 0 on the first tick, so the enemy
-         * snaps straight into READY and can attack once in range. The "too
-         * aggressive" the owner saw earlier was the flat (gravity-less)
-         * projectile, not the pacing - which is fixed now. */
+         * snaps straight into READY and can attack once in range. */
         e->bs[BS_RT]   = 0;
         e->bs[BS_COOL] = 0;
         e->bs[BS_LS] = 1;
@@ -1046,10 +1051,10 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
                 if (b->h.voice) b->h.voice(OB_INTRO, b->h.user);
             }
         }
-        /* the exe body never terrain-probes; the RRR-50 one-time spawn snap
-         * stays as a placement fix for floating shipped data. Bosses are
-         * placed exactly by the arena data - snapping the tall gorilla sprite
-         * pushed it underground (RRR-59). */
+        /* the exe body never terrain-probes; the one-time spawn snap stays as
+         * a placement fix for floating shipped data. Bosses are placed
+         * exactly by the arena data - snapping the tall gorilla sprite pushed
+         * it underground. */
         if (b->h.terrain && d->kind != K_DIVE && d->kind != K_FLYROBOT &&
             d->kind != K_BOSS) {
             int x0,y0,x1,y1, foot = e->y + 1;
@@ -1078,8 +1083,8 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
      * the last Freeze frame (the exe re-writes anim_timer=1 every tick at
      * 0x4165E1 so the frame never advances/wraps, so the wrap-driven lifetime
      * removal never fires). It arcs up then falls far off-screen, then is
-     * gone. The first pass removed it on the first anim wrap (~2 ticks) -
-     * that is the "wrong defeat timing" the owner reported. */
+     * gone. (Removing it on the first anim wrap gives the wrong defeat
+     * timing.) */
     if (e->bs[BS_LS] == 100) {
         if (e->frame >= e->anim_last) {
             e->bs[BS_LS] = 101;
@@ -1115,7 +1120,7 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
      * The snowman does NOT die from a snowball - it falls over stiff, holds
      * on the last Freeze frame for ~120 ticks, then plays the Freeze range
      * BACKWARDS to stand up, then resumes. bs[BS_AF]: 0 falling, 1 held,
-     * 2 getting up. (Owner: it was looping the fall animation.) */
+     * 2 getting up. */
     if (e->bs[BS_LS] == 5) {
         if (e->bs[BS_AF] == 0) {              /* FALLING: Freeze 0..9 once   */
             if (e->frame >= e->anim_last) {
@@ -1154,7 +1159,7 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
          * either drinks milk (OBFL, VULNERABLE) or shoots milk particles
          * (OBSH, invincible). 0x41A5E0 flag 1 in the drink state only
          * (0x40CE39) -> a direct snowball there is the ONLY damage; flag 2
-         * (bounce) everywhere else. Exe 0x40CD70, hand disasm + Codex.
+         * (bounce) everywhere else. Exe 0x40CD70.
          * KRAKE.W01 / "Animation von Krake.txt": OBFL 0..10 "Milch Tanken"
          * (flipflop), OBGE 11..19 punch (unused), OBKO 20..26, OBPA 27..35
          * "Hit", OBSH 36..41 "Shoot", OBTL 42..49 "Talk" (loop 46..49),
@@ -1245,7 +1250,7 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
                 /* exe 0x40D046: on OBSH frame 41 it pins the frame
                  * (rec[0x12]=1) and toggles rec[0x78] every tick - so one
                  * milk particle every 2 ticks for the whole rec[0x74] burst,
-                 * not one per anim loop. Codex-verified 0x40D04D..0x40D0F6. */
+                 * not one per anim loop. Exe 0x40D04D..0x40D0F6. */
                 if (e->frame >= 41) {
                     e->anim_first = 41;            /* pin (anim_last == 41)   */
                     if (!e->bs[BS_AF]) {
@@ -1295,7 +1300,7 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
 
         /* --- gorilla (Welt1E, ObjNr 10): stationary; lobs coconuts; hurt
          * only by a coconut a snowball has turned back (see fa_beh_post).
-         * State machine traced to 0x40C4E0 (Codex-verified). The gorilla.jrs
+         * State machine traced to 0x40C4E0. The gorilla.jrs
          * "Right" range 27..51 is one continuous sheet the exe plays in slices:
          *   47..51 = the speech gesture (mouth), looped while a GB voice plays
          *   27..38 = the chest-beat (exe caps rec[0xc] at 0x26 in 0x40C99D)
@@ -1558,7 +1563,7 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
 
         /* --- robot (Welt3E, ObjNr 14): stationary; fires bolts (ROBOTER.W01
          * frame 188) in one of 3 lanes (rb_lane: the wall button nearest the
-         * kid; the exe buckets screen-x thirds, owner prefers this).
+         * kid; the exe buckets screen-x thirds - this read is preferred).
          * NEVER hurt by a snowball - every exe state calls 0x41A5E0(box,
          * flag 2) = bounce. Damage: the kid pushes the 3 buttons (ObjNr 83)
          * on the left of the arena; all 3 down -> the pipe (ObjNr 85) drops
@@ -1919,9 +1924,9 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
             if (loop_end) {
                 e->bs[BS_KT] = 0;
                 if (--e->bs[BS_N] <= 0) {
-                    /* owner: the throw re-attacks too soon.  End the burst
-                     * into a full ROAM (not straight back to READY) and hold
-                     * a long cooldown so the next throw is a fresh cycle. */
+                    /* end the burst into a full ROAM (not straight back to
+                     * READY) and hold a long cooldown so the next throw is a
+                     * fresh cycle. */
                     e->bs[BS_COOL] = 300;
                     e->bs[BS_LS] = 1;
                     e->bs[BS_RT] = 120 + brand(b, 120);
@@ -1936,8 +1941,8 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
             }
         } else {                          /* READY (state 2, 0x413E84)     */
             /* the exe keeps patrolling in READY (rec[+0x1C] stays 1 except at
-             * walk-frame 15) - it does NOT stand still.  Standing still was
-             * the "gets stuck when it changes direction" the owner saw. */
+             * walk-frame 15) - it does NOT stand still. Standing still makes
+             * it get stuck when it changes direction. */
             patrol_x(e, lo, hi);
             if (--e->bs[BS_RT] <= 0) {
                 e->bs[BS_LS] = 1;
@@ -1946,8 +1951,8 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
             } else if ((wrapped || !can_wrap) && attack_gate(b, e, d)) {
                 set_state(b, e, 16, 0);   /* 0x430b20(rec, 0x10, 1)        */
                 e->bs[BS_LS] = 10;
-                /* exe rec[+6] = 1 + rng%10; owner wants a shorter, more
-                 * deliberate burst - 1..3 shots. */
+                /* exe rec[+6] = 1 + rng%10; a shorter, more deliberate burst
+                 * of 1..3 shots reads better. */
                 e->bs[BS_N]  = 1 + brand(b, 3);
                 e->bs[BS_AF] = 0;
                 e->bs[BS_KT] = 0;
@@ -1979,7 +1984,7 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
  * solid ground - exe 0x40F8E7: 0x434180(plane 2, rec.X + frameW/2,
  * rec.Y + frameH). Checking the record origin instead sinks the whole sprite
  * underground (Welt2E floor is ~90 px below the drop column). Catching it
- * (0x41A3E0 overlap) awards +10000 and ends the level (owner: -> CLASSIFICA).
+ * (0x41A3E0 overlap) awards +10000 and ends the level (-> CLASSIFICA).
  */
 enum { I7_WAIT, I7_FALL, I7_LAND };
 
@@ -2045,7 +2050,7 @@ static int beh_i7(fa_entity_rec *e, int wrapped, void *ctx)
 }
 
 /* ============================================================ *
- * RRR-60: the World-2 yeti arena hazards.                       *
+ * the World-2 yeti arena hazards.                              *
  * ============================================================ */
 
 /*
@@ -2239,7 +2244,7 @@ static int beh_abbruch(fa_entity_rec *e, int wrapped, void *ctx)
 }
 
 /* ================================================================
- * RRR-61: the World-3 (FABBRICA) robot-boss arena mechanism.
+ * the World-3 (FABBRICA) robot-boss arena mechanism.
  * ================================================================
  * 3 buttons (ObjNr 83, rec[0x2A] = index 0/1/2) sit on the left of the
  * arena, frozen on frame 0 until the kid walks into one. A press plays the
@@ -2398,7 +2403,7 @@ fa_beh *fa_beh_create(fa_entity_store *store, const fa_beh_hooks *hooks)
     b->store = store;
     if (hooks) b->h = *hooks;
     b->boss_hp = -1;
-    fa_rng_seed(&b->rng, FA_BEH_RNG_DEFAULT_SEED);   /* RRR-52; fa_beh_seed overrides */
+    fa_rng_seed(&b->rng, FA_BEH_RNG_DEFAULT_SEED);   /* fa_beh_seed overrides */
     for (int i = 0; i < DESC_COUNT; i++)
         fa_entity_set_behaviour(store, DESC[i].obj_nr, beh_enemy, b);
     for (unsigned i = 0; i < sizeof BLOCK_OBJ / sizeof BLOCK_OBJ[0]; i++)
@@ -2406,12 +2411,12 @@ fa_beh *fa_beh_create(fa_entity_store *store, const fa_beh_hooks *hooks)
     fa_entity_set_behaviour(store, 77, beh_paradiso, b);   /* Kinder Paradiso */
     fa_entity_set_behaviour(store, 414, beh_broesel, b);   /* crumbling platform */
     fa_entity_set_behaviour(store, 59, beh_i7, b);         /* boss-arena i7    */
-    fa_entity_set_behaviour(store, 265, beh_iceblock, b);  /* RRR-60 yeti kick */
-    fa_entity_set_behaviour(store, 79, beh_icicle, b);     /* RRR-60 yeti hop  */
-    fa_entity_set_behaviour(store, 80, beh_abbruch, b);    /* RRR-60 yeti floor*/
-    fa_entity_set_behaviour(store, 83, beh_button, b);     /* RRR-61 W3 button */
-    fa_entity_set_behaviour(store, 84, beh_button, b);     /* RRR-61 W3 reactor*/
-    fa_entity_set_behaviour(store, 85, beh_pipe, b);       /* RRR-61 W3 pipe   */
+    fa_entity_set_behaviour(store, 265, beh_iceblock, b);  /* yeti kick        */
+    fa_entity_set_behaviour(store, 79, beh_icicle, b);     /* yeti hop         */
+    fa_entity_set_behaviour(store, 80, beh_abbruch, b);    /* yeti floor       */
+    fa_entity_set_behaviour(store, 83, beh_button, b);     /* W3 button        */
+    fa_entity_set_behaviour(store, 84, beh_button, b);     /* W3 reactor       */
+    fa_entity_set_behaviour(store, 85, beh_pipe, b);       /* W3 pipe          */
     return b;
 }
 
@@ -2470,7 +2475,7 @@ int fa_beh_push(fa_beh *b, int probe_x, int probe_y, int facing)
         if (fa_entity_frame_box(b->store, i, &x0, &y0, &x1, &y1) != 0) continue;
         y0 += (int)(unsigned char)e->raw[0x2a];   /* contact-box top adjust  */
         if (probe_x < x0 || probe_x >= x1 || probe_y < y0 || probe_y >= y1)
-            continue;                             /* half-open, PL-135       */
+            continue;                             /* half-open               */
         e->bs[BS_VX] = facing > 0 ? FX_7_0 : -FX_7_0;
         return 1;
     }
@@ -2518,7 +2523,7 @@ int fa_beh_post(fa_beh *b, int *knockback)
 {
     if (!b) { if (knockback) *knockback = 0; return 0; }
 
-    /* RRR-59: a player snowball that reaches an incoming boss coconut turns
+    /* a player snowball that reaches an incoming boss coconut turns
      * it back toward the boss (0x40C2C0: vx -> +/-9.0, vy -> -9.0). The
      * snowball is consumed. */
     for (int i = 0; i < FA_BEH_MAX_PROJ; i++) {
@@ -2561,7 +2566,7 @@ int fa_beh_post(fa_beh *b, int *knockback)
         if (--p->life <= 0) { p->alive = 0; continue; }
         if (b->h.terrain && b->h.terrain(wx, wy, b->h.user) == 1) { p->alive = 0; continue; }
 
-        /* RRR-59: a turned-back coconut on the boss body is one accepted hit
+        /* a turned-back coconut on the boss body is one accepted hit
          * (0x40C338). Ten hits -> +10000 -> KO (0x40CB5B). */
         if (p->reflected && p->owner_obj == 10) {
             fa_entity_rec *bo = boss_rec(b);

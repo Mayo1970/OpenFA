@@ -1,8 +1,9 @@
 /*
- * fa_w02.h - .W02 "MultiFile / Pool" container (RRR-42)
+ * fa_w02.h - .W02 "MultiFile / Pool" container
  *
- * Direct port of RRR-19 (W02_GetFileHeader fcn.0042e452, W02_SelectChunk
- * fcn.0042e2ff, W02_LoadChunk fcn.0042e4ec). Layout, little-endian:
+ * Direct port of the reverse-engineered readers (W02_GetFileHeader
+ * fcn.0042e452, W02_SelectChunk fcn.0042e2ff, W02_LoadChunk fcn.0042e4ec).
+ * Layout, little-endian:
  *
  *   [ 281-byte header (0x119) ]
  *   [ chunk 0 ][ chunk 1 ] ... [ chunk N-1 ]          from 0x119

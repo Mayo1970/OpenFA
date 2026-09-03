@@ -1,9 +1,9 @@
 /*
- * fa_player.c - the player controller (RRR-43). See fa_player.h.
+ * fa_player.c - the player controller. See fa_player.h.
  *
  * Fixed-point, one step per 60 Hz tick, no float. Movement lifted from
- * JR_FERRERO.exe fcn.00417370 / fcn.00431bf0 (PL-083/084). The original
- * stores position/velocity in 20.12 fixed point; this module keeps 16.16
+ * JR_FERRERO.exe fcn.00417370 / fcn.00431bf0. The original stores
+ * position/velocity in 20.12 fixed point; this module keeps 16.16
  * internally - only the px/tick values below carry over, not the base.
  */
 #include "fa/fa_player.h"
@@ -13,11 +13,11 @@
 #include <string.h>
 
 /* Units are px/tick (or px/tick^2). At 60 Hz, 1.0 px/tick = 60 px/s.
- * All from JR_FERRERO.exe except `gravity` (PL-084 estimate). */
+ * All from JR_FERRERO.exe except `gravity` (estimate). */
 const fa_player_tuning FA_PLAYER_DEFAULT_TUNING = {
-    /* gravity          */ (FA_FIX(6)) / 10,   /* 0.6 px/tick^2  (PL-087: shared world const, float @0x452254) */
-    /* jump_vel         */ -(FA_FIX(11)),      /* penguin: -11.0 px/tick (PL-084: exe 0x B000) */
-    /* jump_vel_c1      */ -(FA_FIX(9)),       /* Fettalatte: lower jump (owner-tuned)   */
+    /* gravity          */ (FA_FIX(6)) / 10,   /* 0.6 px/tick^2  (shared world const, float @0x452254) */
+    /* jump_vel         */ -(FA_FIX(11)),      /* penguin: -11.0 px/tick (exe 0xB000)    */
+    /* jump_vel_c1      */ -(FA_FIX(9)),       /* Fettalatte: lower jump (tuned)         */
     /* jump_hold_gravity*/ (FA_FIX(2)) / 10,   /* 0.2 px/tick^2 while JUMP held + rising */
     /* jump_hold_ticks  */ 10,                 /* exe [0x4e10b0] init 10 in state 4   */
     /* run_speed      */ FA_FIX(5),            /* +/-5.0 px/tick, set directly (exe 0x5000) */
@@ -28,30 +28,31 @@ const fa_player_tuning FA_PLAYER_DEFAULT_TUNING = {
     /* floor_y        */ FA_FIX(480),
     /* glide_max_vy   */ (FA_FIX(15)) / 10,    /* 1.5 px/tick slow sink (penguin) */
 
-    /* climb_speed    */ FA_FIX(3),            /* PL-102: 3 px/tick on a ladder     */
-    /* climb_jump_vx  */ FA_FIX(5),            /* PL-102: 0x5000 hop-off             */
-    /* idle_delay     */ 300,                  /* PL-101: 0x12c on entering stand    */
-    /* idle_repeat    */ 240,                  /* PL-101: 0xf0 between later rolls   */
-    /* swap_ticks     */ 94,                   /* PL-104: pi0020.wav 1.57s @ 60 Hz   */
-    /* swap_ticks_c1  */ 124,                  /* PL-104: ms0013.wav 1.75s + turn-back */
-    /* swap_end_c1    */ 19,                   /* PL-104: MILCH 150..159 = 9 frames*2  */
-    /* push_obj_vx    */ FA_FIX(7),            /* PL-103: 0x40e00000 shove speed    */
+    /* climb_speed    */ FA_FIX(3),            /* 3 px/tick on a ladder             */
+    /* climb_jump_vx  */ FA_FIX(5),            /* 0x5000 hop-off                     */
+    /* climb_dismount_speed */ FA_FIX(6),      /* port-only assist, tunable          */
+    /* idle_delay     */ 300,                  /* 0x12c on entering stand            */
+    /* idle_repeat    */ 240,                  /* 0xf0 between later rolls           */
+    /* swap_ticks     */ 94,                   /* pi0020.wav 1.57s @ 60 Hz           */
+    /* swap_ticks_c1  */ 124,                  /* ms0013.wav 1.75s + turn-back       */
+    /* swap_end_c1    */ 19,                   /* MILCH 150..159 = 9 frames*2        */
+    /* push_obj_vx    */ FA_FIX(7),            /* 0x40e00000 shove speed            */
 
     /* throw_cooldown */ 4,                    /* small gap after the throw lock ends */
-    /* throw_ticks    */ 54,                   /* penguin: (260-233)*2, PL-100        */
+    /* throw_ticks    */ 54,                   /* penguin: (260-233)*2               */
     /* throw_ticks_c1 */ 46,                   /* Fettalatte: (296-273)*2            */
     /* throw_release  */ 44,                   /* penguin: frame 255 = (255-233)*2   */
     /* throw_release_c1*/ 36,                  /* Fettalatte: frame 291 = (291-273)*2 */
-    /* snow_vx      */ FA_FIX(16),             /* forward throw (PL-085: 0x41800000)  */
+    /* snow_vx      */ FA_FIX(16),             /* forward throw (0x41800000)          */
     /* snow_vy      */ -(FA_FIX(23)) / 2,      /* -11.5 (exe -11 or -12, randomised)  */
     /* snow_vx_up   */ FA_FIX(9),              /* up throw (Up held + Fire)           */
     /* snow_vy_up   */ -(FA_FIX(21)),          /* -21 (exe -20..-22, randomised)      */
-    /* snow_gravity */ FA_FIX(1),             /* 1.0 px/tick^2 (PL-086)              */
-    /* snow_term_vy */ FA_FIX(20),            /* 20.0 terminal (PL-086)             */
+    /* snow_gravity */ FA_FIX(1),             /* 1.0 px/tick^2                       */
+    /* snow_term_vy */ FA_FIX(20),            /* 20.0 terminal                      */
     /* snow_life    */ 120,
-    /* snow_off_x   */ FA_FIX(32),            /* PL-085: player.X +/-32             */
-    /* snow_off_y   */ -(FA_FIX(100)),        /* PL-085: player.Y -100             */
-    /* body_hw      */ 10,                    /* RRR-44 / PL-109: first pass        */
+    /* snow_off_x   */ FA_FIX(32),            /* player.X +/-32                     */
+    /* snow_off_y   */ -(FA_FIX(100)),        /* player.Y -100                      */
+    /* body_hw      */ 10,                    /* first pass                         */
     /* body_h       */ 44,                    /* feet at y, head ~44 px up          */
 };
 
@@ -110,7 +111,7 @@ void fa_player_set_solid(fa_player *p, int (*fn)(int px, int py, void *ctx),
     p->solid_ctx = ctx;
 }
 
-/* RRR-44: a solid terrain pixel just below the feet (centre + both corners). */
+/* a solid terrain pixel just below the feet (centre + both corners). */
 static int feet_blocked(const fa_player *p)
 {
     if (!p->solid_fn) return 0;
@@ -142,7 +143,7 @@ static int32_t climb_ledge_y(const fa_player *p, int up, int down)
     return INT32_MAX;
 }
 
-/* xorshift32 - a deterministic stand-in for the game RNG 0x4395b0 (RRR-52). */
+/* xorshift32 - a deterministic stand-in for the game RNG 0x4395b0. */
 static uint32_t prng(fa_player *p)
 {
     uint32_t x = p->rng_state;
@@ -164,7 +165,7 @@ static int ladder_at(fa_player *p, int px, int py)
 }
 
 /*
- * PL-102 / exe fcn.0041a830 (IsLadderAtOrNear): the climb grab has a long
+ * exe fcn.0041a830 (IsLadderAtOrNear): the climb grab has a long
  * UPWARD reach - the original probes the feet, feet-10 and feet-160, so a
  * vine that hangs up to ~160 px overhead can still be grabbed from the
  * ground (the kid then climbs up through the air to reach it). We scan the
@@ -206,7 +207,7 @@ static void finalize(fa_player *p, int jump_raw, int swit, int fire, int in_thro
                       (p->on_ground << 1) | (p->facing == FA_FACE_RIGHT)));
     mix(p, (uint32_t)((p->swap_timer << 8) | (p->idle_sound << 6) |
                       (p->idle_kind << 4) | (p->on_ladder << 2) |
-                      (p->climb_moving << 1)));
+                      (p->climb_moving << 1) | p->dismount));
     mix(p, (uint32_t)fa_player_live_snowballs(p));
 }
 
@@ -219,8 +220,8 @@ static int32_t ground_at(const fa_player *p, int32_t x)
     return p->t.floor_y;
 }
 
-/* PL-086: X += vx; Y += vy; vy += gravity (clamped to snow_term_vy). Killed
- * on lifetime, on the ground, or off the world (collision is RRR-44). */
+/* X += vx; Y += vy; vy += gravity (clamped to snow_term_vy). Killed on
+ * lifetime, on the ground, or off the world. */
 static void step_snowballs(fa_player *p)
 {
     for (int i = 0; i < FA_MAX_SNOWBALLS; i++) {
@@ -239,8 +240,8 @@ static void step_snowballs(fa_player *p)
     }
 }
 
-/* PL-085: forward throw = vx +/-16, vy ~-11.5; with UP held = vx +/-9,
- * vy ~-21. Spawn at player.X +/-32, player.Y -100. */
+/* forward throw = vx +/-16, vy ~-11.5; with UP held = vx +/-9, vy ~-21.
+ * Spawn at player.X +/-32, player.Y -100. */
 static void spawn_snowball(fa_player *p, int up)
 {
     for (int i = 0; i < FA_MAX_SNOWBALLS; i++) {
@@ -275,7 +276,7 @@ void fa_player_tick(fa_player *p, uint32_t in)
     int fire_edge   = fire && !p->fire_held_prev;
     int jump_raw    = jump;
 
-    /* ---- SWAP (PL-104): all input locked; toggle the kid when it ends ---- */
+    /* ---- SWAP: all input locked; toggle the kid when it ends ---- */
     if (p->swap_timer > 0) {
         p->vx = p->vy = 0;
         if (--p->swap_timer == 0) {
@@ -289,7 +290,7 @@ void fa_player_tick(fa_player *p, uint32_t in)
         return;
     }
 
-    /* ---- CLIMB (PL-102, exe state 13 fcn.004186dc): no gravity while on a
+    /* ---- CLIMB (exe state 13 fcn.004186dc): no gravity while on a
      * vine. UP climbs toward a vine anywhere within FA_CLIMB_REACH overhead
      * (the kid rises through the air to grab it) and stops at its top; DOWN
      * descends while a vine covers the feet, then steps onto the ground. ---- */
@@ -297,6 +298,7 @@ void fa_player_tick(fa_player *p, uint32_t in)
         int px = fa_player_px(p);
         int step = t->climb_speed >> 16; if (step < 1) step = 1;
         int moved = 0;
+        int vine_ran_out = 0;      /* exe [esp+0x1c] at 0x4187a8 */
         p->vx = p->vy = 0;
         p->on_ground = 0;
 
@@ -305,8 +307,32 @@ void fa_player_tick(fa_player *p, uint32_t in)
             p->vy = p->character ? t->jump_vel_c1 : t->jump_vel;
             p->jump_hold = t->jump_hold_ticks;
             p->on_ladder = 0;
+            p->dismount = 0;                /* JUMP cancels the assist */
             if (left || right)
                 p->vx = (left ? -1 : 1) * t->climb_jump_vx;
+            finalize(p, jump_raw, swit, fire, 0);
+            return;
+        }
+
+        /* Dismount assist - a deliberate deviation from the exe. The original
+         * stops the feet at the vine's top pixel and leaves the kid hanging
+         * there (verified twice: 0x4186dc has no ledge search and exactly one
+         * position write at 0x4188ef). We add a pull-up onto the deck, but we
+         * arm it only where the vine actually ran out, and we glide instead of
+         * teleporting. Once armed the move is committed; only JUMP aborts it. */
+        if (p->dismount) {
+            int dstep = t->climb_dismount_speed >> 16; if (dstep < 1) dstep = 1;
+            for (int i = 0; i < dstep && p->y != p->dismount_y; i++)
+                p->y += (p->y > p->dismount_y) ? -FA_FIX(1) : FA_FIX(1);
+            p->climb_moving = 1;
+            p->on_ladder = 1;
+            if (p->y == p->dismount_y) {
+                p->dismount = 0;
+                p->on_ground = 1;
+                p->on_ladder = 0;
+                p->state = FA_PST_STAND;
+                p->idle_timer = t->idle_delay;
+            }
             finalize(p, jump_raw, swit, fire, 0);
             return;
         }
@@ -314,12 +340,12 @@ void fa_player_tick(fa_player *p, uint32_t in)
         if (up) {
             for (int i = 0; i < step; i++) {
                 int ny = fa_player_py(p) - 1;
-                if (!ladder_near_y(p, ny)) break;   /* reached the vine top */
+                /* the vine ends here: the exe stops and sets its flag, and it
+                 * keeps climbing through any deck on the way (0x41879b passes
+                 * a head tile whose code has bit 0 or bit 1 set). */
+                if (!ladder_near_y(p, ny)) { vine_ran_out = 1; break; }
                 if (p->solid_fn && p->solid_fn(px, ny - t->body_h,
                         p->solid_ctx) == FA_SOLID_FULL) break;  /* ceiling */
-                /* a floor now within reach around the feet = we climbed up to
-                 * a deck: stop rising; the dismount below lifts us onto it. */
-                if (climb_ledge_y(p, t->body_h, -4) != INT32_MAX) break;
                 p->y -= FA_FIX(1); moved = 1;
             }
         } else if (down) {
@@ -354,15 +380,14 @@ void fa_player_tick(fa_player *p, uint32_t in)
         int32_t gnd = ground_at(p, p->x);
         int on_floor = (!p->solid_fn && p->y >= gnd) || feet_blocked(p);
 
-        /* A floor within reach around the feet ends the climb: lift or drop
-         * the kid onto it and stand - no jump. Works both ways: a deck the
-         * rising feet just reached, and a deck around the body when the rope
-         * hangs from an upper floor. DOWN still climbs past / below a deck. */
-        if (!on_floor && !down && p->solid_fn) {
-            /* climbing up: only a floor ABOVE the feet counts, so the kid is
-             * never yanked back down onto a deck it has just passed. */
-            int32_t ly = climb_ledge_y(p, t->body_h, up ? -4 : 8);
-            if (ly != INT32_MAX) { p->y = ly; on_floor = 1; }
+        /* Arm the assist only where the vine ran out under a reachable deck.
+         * Resting on a vine, or passing a deck mid-climb, no longer moves the
+         * kid - that was the source of the yank. A vine that ends in open air
+         * (Welt1 x=68 / 99 / 199) finds no ledge and still leaves the kid
+         * hanging at the top, exactly as the exe does. */
+        if (!on_floor && vine_ran_out && p->solid_fn) {
+            int32_t ly = climb_ledge_y(p, t->body_h, -4);
+            if (ly != INT32_MAX) { p->dismount = 1; p->dismount_y = ly; }
         }
 
         int has_vine = ladder_near(p) ||
@@ -373,7 +398,10 @@ void fa_player_tick(fa_player *p, uint32_t in)
             p->on_ground = 1;
             p->state = FA_PST_STAND;
             p->on_ladder = 0;
+            p->dismount = 0;
             p->idle_timer = t->idle_delay;
+        } else if (p->dismount) {
+            p->on_ladder = 1;                  /* pulling up onto the deck */
         } else if (!has_vine) {
             p->state = FA_PST_FALL;            /* climbed off the top */
             p->on_ladder = 0;
@@ -384,7 +412,7 @@ void fa_player_tick(fa_player *p, uint32_t in)
         return;
     }
 
-    /* ---- PUSH (PL-135, Fettalatte only): state 33 is a COMMITTED clip
+    /* ---- PUSH (Fettalatte only): state 33 is a COMMITTED clip
      * (MILCHSCHNITTE 172..190, ~38 ticks). The exe does NOT test the
      * direction input during the clip - releasing LEFT/RIGHT does not abort
      * it. It exits early only on loss of grounding or the kind-5 probe
@@ -407,7 +435,7 @@ void fa_player_tick(fa_player *p, uint32_t in)
         return;
     }
 
-    /* the throw is a committed animation (PL-100): while it runs the player
+    /* the throw is a committed animation: while it runs the player
      * holds still and faces the way it did on the press - movement, jump,
      * crouch and switch inputs are ignored until it finishes. */
     int in_throw = p->throw_anim > 0;
@@ -438,12 +466,13 @@ void fa_player_tick(fa_player *p, uint32_t in)
         p->on_ground = 0;
         p->on_ladder = 1;
         p->climb_moving = 0;
+        p->dismount = 0;
         p->idle_kind = p->idle_play = 0;
         finalize(p, jump_raw, swit, fire, 0);
         return;
     }
 
-    /* ---- PUSH entry (PL-135): Fettalatte in WALK, on the ground, facing
+    /* ---- PUSH entry: Fettalatte in WALK, on the ground, facing
      * exactly LEFT or RIGHT and holding that same direction, with an active
      * flag-2 pushable box at (body_x +/- 32, body_y - 100). The exe has NO
      * player-velocity requirement. ---- */
@@ -466,7 +495,7 @@ void fa_player_tick(fa_player *p, uint32_t in)
     if (dir > 0) p->facing = FA_FACE_RIGHT;
     else if (dir < 0) p->facing = FA_FACE_LEFT;
 
-    /* horizontal (PL-084): on the ground vx is SET to +/-run_speed, no ramp;
+    /* horizontal: on the ground vx is SET to +/-run_speed, no ramp;
      * in the air it accelerates by air_accel toward +/-air_max. */
     if (p->on_ground) {
         int32_t cap = crouching ? t->crouch_max : t->run_speed;
@@ -494,7 +523,7 @@ void fa_player_tick(fa_player *p, uint32_t in)
         else                   p->jump_hold = 0;
     }
 
-    /* gravity (PL-087: vy += 0.6 each tick, clamped to +20.0 terminal - the
+    /* gravity: vy += 0.6 each tick, clamped to +20.0 terminal - the
      * shared fall integrator, float @0x452254 / @0x452250). While the jump
      * hold window is open the softer jump_hold_gravity applies instead. */
     if (!p->on_ground) {
@@ -509,11 +538,10 @@ void fa_player_tick(fa_player *p, uint32_t in)
     if (p->gliding && p->vy > t->glide_max_vy)
         p->vy = t->glide_max_vy;
 
-    /* integrate + resolve. With a map probe (RRR-44) this is a swept AABB
-     * against fa_collide: solid tiles stop every axis, one-way platforms
-     * stop a landing only, nothing tunnels at the terminal fall speed.
-     * Without one it is the RRR-43 flat floor + optional raised-surface
-     * probe. */
+    /* integrate + resolve. With a map probe this is a swept AABB against
+     * fa_collide: solid tiles stop every axis, one-way platforms stop a
+     * landing only, nothing tunnels at the terminal fall speed. Without one
+     * it is the flat floor + optional raised-surface probe. */
     if (p->solid_fn) {
         fa_aabb_body bd;
         bd.x = p->x; bd.y = p->y; bd.vx = p->vx; bd.vy = p->vy;
@@ -542,7 +570,7 @@ void fa_player_tick(fa_player *p, uint32_t in)
 
     /* throw: on the press edge (ground, not crouching, not already throwing)
      * start the locked animation; the snowball leaves the hand throw_release
-     * ticks in, not now (PL-100). */
+     * ticks in, not now. */
     if (p->throw_timer > 0) p->throw_timer--;
     if (p->throw_anim > 0) {
         int release = p->character ? t->throw_release_c1 : t->throw_release;
@@ -568,7 +596,7 @@ void fa_player_tick(fa_player *p, uint32_t in)
         p->state = FA_PST_STAND;
 
     /*
-     * idle (PL-101 / player-anim-disasm-2 section 1): only while standing
+     * idle: only while standing
      * still. idle_timer counts down; at 0 roll rng%3 -> 0 nothing / 1 idle A
      * / 2 idle B. Penguin idle A and Fettalatte's idle each start a voice
      * line (state 1 / state 17, channel 17); the exe holds the clip until

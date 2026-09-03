@@ -1,5 +1,5 @@
 /*
- * fa_render.c - scene camera + frame compositor (RRR-42). See fa_render.h.
+ * fa_render.c - scene camera + frame compositor. See fa_render.h.
  */
 #include "fa/fa_render.h"
 #include "fa/fa_surface.h"
@@ -147,7 +147,7 @@ int fa_tileset_frame_count(const fa_tileset *ts)
     return ts ? ts->count : 0;
 }
 
-/* RRR-44 follow-up: per-pixel terrain collision. See fa_render.h. */
+/* Per-pixel terrain collision. See fa_render.h. */
 int fa_render_solid_px(const struct fa_map *m, const fa_tileset *ts,
                        int world_x, int world_y)
 {
@@ -205,14 +205,13 @@ static int pick_backdrop_frame(const fa_w01 *bg, int vw, int vh)
 }
 
 /* Far backdrop = frame 4 of the level .W01 (the 800x600 painted wall).
- * RRR-55: the exe draws it as a static screen-locked image - the 8 grid
- * planes all carry MapInfo+278 parallax factor 2 (== 1:1, no inter-plane
- * parallax; RRR-55/draw-order-disasm.md), and an 800-wide backdrop in an
+ * The exe draws it as a static screen-locked image - the 8 grid planes all
+ * carry MapInfo+278 parallax factor 2 (== 1:1, no inter-plane parallax), and
+ * an 800-wide backdrop in an
  * 800-wide viewport has zero horizontal slack. So the backdrop pans only
  * across whatever slack it actually has, on BOTH axes, and NEVER wraps -
- * the old half-speed + horizontal wrap produced a moving vertical seam
- * (owner: "layer parts do not match" - the stray dark strip in Welt3 was
- * frame 4's left edge wrapping into view). */
+ * a half-speed + horizontal wrap produces a moving vertical seam (frame 4's
+ * left edge wrapping into view as a stray dark strip). */
 static void draw_backdrop(const fa_surface *dst, const fa_w01 *bg, int frame,
                           const fa_camera *cam)
 {
@@ -382,7 +381,7 @@ int fa_render_scene(const fa_surface *dst, const fa_scene *sc,
         const char *dbg = getenv("FA_DBG_PLANEMASK");
         unsigned mask = dbg ? (unsigned)strtoul(dbg, NULL, 0) : 0xFFFFFFFFu;
         /* per plane: entities behind, the tile plane, entities in front
-         * (RRR-42/entity-tail-disasm.md: band 1, tiles, band 0, band 2) */
+         * (band 1, tiles, band 0, band 2) */
         for (int pl = 0; pl < planes; pl++) {
             if (!(mask & (1u << pl))) continue;
             if (sc->ents) fa_entity_draw_band(dst, sc->ents, cam, pl, 1);

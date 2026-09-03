@@ -1,5 +1,5 @@
 /*
- * fa_app.h - the desktop-slice application loop (RRR-41)
+ * fa_app.h - the desktop-slice application loop
  *
  * Wires a platform backend (fa_platform.h) to the fixed-timestep loop
  * (fa_loop.h), the RGB565 framebuffer (fa_surface.h) and the input model
@@ -16,7 +16,7 @@
  *
  * The sim callback gets a pointer to a uint32 action bitmask (bit
  * (1u << fa_action) per held action, from the current binds). Every sim tick
- * in one frame sees the same latched state (PL-031), including the separate
+ * in one frame sees the same latched state, including the separate
  * down-edge masks used by menus and one-shot actions.
  */
 #ifndef FA_APP_H
@@ -44,7 +44,7 @@ typedef struct fa_frame_pad {
 /*
  * The per-frame input handed to every sim tick. `actions` is first, so old
  * consumers that do `*(const uint32_t *)input` still read the action mask.
- * The pointer / buttons are the menu input (RRR-40): framebuffer pixels,
+ * The pointer / buttons are the menu input: framebuffer pixels,
  * latched once per frame, `btn_pressed` is the down edge.
  */
 typedef struct fa_frame_input {
@@ -102,8 +102,8 @@ typedef struct fa_app_cbs {
     /* Optional: fill `buf` with up to `max_frames` interleaved S16 stereo
      * frames for this frame's audio, at `rate` Hz / `channels` channels.
      * Return the number of frames written (0 = silence). Called once per
-     * rendered frame, after render. RRR-46 feeds the real mixer here; the
-     * slice uses it for a test tone. */
+     * rendered frame, after render. The real mixer feeds here; the slice
+     * uses it for a test tone. */
     int  (*audio)(int16_t *buf, int max_frames, int rate, int channels,
                   void *user);
 

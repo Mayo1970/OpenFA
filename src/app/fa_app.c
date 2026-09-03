@@ -1,5 +1,5 @@
 /*
- * fa_app.c - the desktop-slice application loop (RRR-41)
+ * fa_app.c - the desktop-slice application loop
  * See include/fa/fa_app.h for the frame model.
  */
 #include "fa/fa_app.h"

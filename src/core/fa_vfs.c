@@ -1,6 +1,6 @@
 /*
- * fa_vfs.c - storage abstraction: write beside the game, never inside GData
- *            (RRR-39). See include/fa/fa_vfs.h. Zero external dependencies.
+ * fa_vfs.c - storage abstraction: write beside the game, never inside GData.
+ *            See include/fa/fa_vfs.h. Zero external dependencies.
  */
 #include "fa/fa_vfs.h"
 

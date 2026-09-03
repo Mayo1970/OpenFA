@@ -1,12 +1,10 @@
 /*
- * fa_hiscore.h - the CLASSIFICA / high-score screen (RRR-47 + the offline
- * scoreboard pass, 2026-09-02)
+ * fa_hiscore.h - the CLASSIFICA / high-score screen
  *
  * Reverse-engineered from JR_FERRERO.exe scene 15: tick handler 0x402DB0,
  * teardown 0x402CE0, the Schrift glyph map 0x401190 / the text draw 0x4012F0,
  * the table draw 0x40388D..0x403936, the per-world insert+write 0x4091B0 /
- * 0x409EE0, and the name-entry field 0x4093A0.  See the memory note
- * "scoreboard-classifica-oracle" for the full trace.
+ * 0x409EE0, and the name-entry field 0x4093A0.
  *
  * Screen: blit GData\Pics\HighscoreBG.bmp, then
  *   - four world TAB buttons on the left (Giungla / Montagna / Fabbrica1 /
@@ -14,7 +12,7 @@
  *     world's table is shown, with alsf08.wav on the hover edge; the shown
  *     world's tab is drawn lit (frame 4), the rest dim (frame 2)
  *   - the beaten world's boss portrait (Gegner.w01 frame = world) on the
- *     right, only after a run (owner-signed-off 2026-09-02)
+ *     right, only after a run
  *   - a BACK button (indietro.w01) bottom-right
  *   - ten name / score rows for the shown world, Y = 128 + 32*row:
  *       rank  X = 180   "1." .. "10."
@@ -24,8 +22,8 @@
  * When a run's score places in the shown world's table it is inserted and the
  * new row becomes an editable name field (type A-Z / 0-9 / space / '-', max
  * 28 chars, Backspace deletes, Enter confirms).  On confirm the table is
- * written to  <install>/Highscore{world}.dat  (beside the game, RRR-39; the
- * Save\ prefix the .exe used is dropped).  The reader prefers that file over
+ * written to  <install>/Highscore{world}.dat  (beside the game; the Save\
+ * prefix the .exe used is dropped).  The reader prefers that file over
  * the shipped GData\Save\ copy.  Confirming the name also leaves straight to
  * the menu - a console port has no pointer to click BACK or a world tab.
  *

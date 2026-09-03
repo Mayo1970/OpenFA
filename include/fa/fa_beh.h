@@ -1,18 +1,16 @@
 /*
- * fa_beh.h - per-ObjNr enemy behaviour layer (RRR-51)
+ * fa_beh.h - per-ObjNr enemy behaviour layer
  *
  * The exe installs one behaviour callback per placed object at record +0x5E
  * (fcn.004311C0 walks the records; the switch at 0x4119F7..0x411F9C picks the
- * handler). DetailGroup-3 records are enemies. fa_entity.c (RRR-50) runs the
- * generic patrol / animation / lifetime only; this module binds the real
- * per-type behaviour through fa_entity_set_behaviour().
+ * handler). DetailGroup-3 records are enemies. fa_entity.c runs the generic
+ * patrol / animation / lifetime only; this module binds the real per-type
+ * behaviour through fa_entity_set_behaviour().
  *
  * Reverse-engineered from JR_FERRERO.exe by hand off jr_disasm.txt (the
  * per-ObjNr handlers 0x415FF0 papagei / 0x413CB0 kong / 0x40A700 adler / ...,
  * the shared updater 0x4335A0, the animation-range selector 0x430B20, the
- * player-contact helper 0x41A3E0, the projectile test 0x41A5E0). See
- * RRR-51/enemy-behaviour-disasm.md (Codex, corrected by the by-hand pass) and
- * RRR-51/RRR-51-report.md.
+ * player-contact helper 0x41A3E0, the projectile test 0x41A5E0).
  *
  * FACTS THE IMPLEMENTATION FOLLOWS (each verified in the raw disassembly):
  *   - Movement is float pos +0x94/+0x98 and float vel +0x9c/+0xa0. Ground
@@ -36,7 +34,7 @@
  *     is the exception - it freezes ~120 ticks and thaws.
  *   - Bosses (9/10/14/18): 10 accepted hits, +10000, then KO. The gorilla (10)
  *     is hurt only by a reflected coconut; the yeti (9) and octopus (18) take a
- *     direct body snowball. The robot (14) is not implemented yet (RRR-61).
+ *     direct body snowball.
  */
 #ifndef FA_BEH_H
 #define FA_BEH_H
@@ -47,9 +45,9 @@
 extern "C" {
 #endif
 
-/* RRR-52: the default seed for the enemy RNG stream. The exe seeds rand()
- * from the wall clock (fcn @0x42AE27), so its stream differs every run; the
- * port fixes it for a deterministic replay (RRR-34). fa_beh_seed overrides. */
+/* The default seed for the enemy RNG stream. The exe seeds rand() from the
+ * wall clock (fcn @0x42AE27), so its stream differs every run; the port fixes
+ * it for a deterministic replay. fa_beh_seed overrides. */
 #define FA_BEH_RNG_DEFAULT_SEED 1u
 
 struct fa_entity_store;
@@ -68,14 +66,14 @@ enum {
     FA_BEH_SFX_BOSS_KO,        /* a boss was defeated                       */
     FA_BEH_SFX_BROESEL_BREAK,  /* a crumbling platform broke (0x422B60 id 6,
                                 * knusper.wav, slot 6)                       */
-    FA_BEH_SFX_BOSS_CHARGE,    /* RRR-61: the robot boss winds up to fire   */
-    FA_BEH_SFX_BOSS_KO_ANIM,   /* RRR-61: a beat inside the boss KO anim
+    FA_BEH_SFX_BOSS_CHARGE,    /* the robot boss winds up to fire           */
+    FA_BEH_SFX_BOSS_KO_ANIM,   /* a beat inside the boss KO anim
                                 * (robot: w3sf04b ch10 at RBKO frame 56)    */
-    FA_BEH_SFX_BOSS_LAND,      /* RRR-60: the yeti hop landing thud
+    FA_BEH_SFX_BOSS_LAND,      /* the yeti hop landing thud
                                 * (w2sf04 ch9, exe 0x40E6BE / 0x40EA9F)     */
-    FA_BEH_SFX_BOSS_HURT,      /* RRR-60: the yeti hurt grunt
+    FA_BEH_SFX_BOSS_HURT,      /* the yeti hurt grunt
                                 * (w2sf05 ch10, exe 0x40EA0D at hit fr 69)  */
-    FA_BEH_SFX_BOSS_VOICE_CUT  /* RRR-60: a hit cuts the boss voice line
+    FA_BEH_SFX_BOSS_VOICE_CUT  /* a hit cuts the boss voice line
                                 * (exe 0x40E5DB stop channel 18)            */
 };
 
@@ -136,14 +134,14 @@ void    fa_beh_set_world(fa_beh *b, int world);
  * per-character line. Call each tick before fa_entity_tick; default 0. */
 void    fa_beh_set_character(fa_beh *b, int character);
 
-/* RRR-60: the current snowball type - 1 = "dirty" (black) balls from
+/* the current snowball type - 1 = "dirty" (black) balls from
  * collect_dirtyballs (ObjNr 60, ds:0x4E1044), 0 = normal. Only dirty balls
  * hurt the World-2 yeti boss (exe 0x41A5E0 returns 2 for a non-0x105 ball,
  * which the yeti's state-1/3 check accepts as a hit). Call each tick before
  * fa_entity_tick; default 0. */
 void    fa_beh_set_ammo_dirty(fa_beh *b, int dirty);
 
-/* RRR-52: reseed the enemy RNG stream (the exe's single rand() stream, the
+/* reseed the enemy RNG stream (the exe's single rand() stream, the
  * source of every random roam / ready / burst-length timer). Call once per
  * level load, after fa_beh_create, for a reproducible run. */
 void    fa_beh_seed(fa_beh *b, uint32_t seed);
@@ -179,7 +177,7 @@ int fa_beh_damage_player(const fa_beh *b, int player);
 int fa_beh_knockback_player(const fa_beh *b, int player);
 
 /*
- * The Fettalatte shove (PL-135). On the push animation's frame-176 event the
+ * The Fettalatte shove. On the push animation's frame-176 event the
  * host calls this with the kind-5 probe point (body_x +/- 32, body_y - 100)
  * and the facing (+1 right / -1 left). If an active pushable block (ObjNr
  * 76/78/86/87) contains that point, its float vx is set to +/-7.0 for one
@@ -218,13 +216,13 @@ int fa_beh_projectile(const fa_beh *b, int i, int *wx, int *wy, int *owner_obj);
 int fa_beh_boss_hp(const fa_beh *b);          /* -1 if no boss in the level */
 
 /*
- * RRR-59: the World-1 gorilla boss (ObjNr 10, Welt1E). The boss is stationary
- * and lobs coconuts (0x40C4E0 states 1/2/10, callback 0x40C2C0). A player
+ * The World-1 gorilla boss (ObjNr 10, Welt1E). The boss is stationary and
+ * lobs coconuts (0x40C4E0 states 1/2/10, callback 0x40C2C0). A player
  * snowball that strikes an incoming coconut sends it back (vx -> +/-9.0,
  * vy -> -9.0); a returned coconut on the boss body is one accepted hit. Ten
  * hits -> +10000 -> KO. `fa_beh_boss_defeated` is 1 once that KO has fired.
  *
- * RRR-60: the World-2 yeti boss (ObjNr 9, Welt2E, 0x40E350). Stationary; holds
+ * The World-2 yeti boss (ObjNr 9, Welt2E, 0x40E350). Stationary; holds
  * a frozen pose and periodically KICKS or HOPS or talks. Only a DIRTY ("black")
  * snowball (collect_dirtyballs, ObjNr 60) hurts it, and only while it is idle
  * or kicking. Same 10 hits -> +10000 -> KO and the same 7th-piece (ObjNr 59)
@@ -233,14 +231,14 @@ int fa_beh_boss_hp(const fa_beh *b);          /* -1 if no boss in the level */
  *   - HOP (and every hit-recoil jump) drops a pattern of ceiling icicles
  *     (ObjNr 79).
  *   - the ice platform under it (ObjNr 80) stops animating on the KO.
- * fa_beh binds behaviours to ObjNr 265 / 79 / 80 automatically. The robot (14)
- * boss is still a statue (RRR-61); the octopus (18) takes any direct snowball.
+ * fa_beh binds behaviours to ObjNr 265 / 79 / 80 automatically. The octopus
+ * (18) takes any direct snowball.
  */
 int fa_beh_boss_defeated(const fa_beh *b);
 
-/* RRR-59: 1 once the player has caught the 7th recipe piece (ObjNr 59) that
- * drops when the World-1 boss is defeated. The host then ends the level
- * (owner: -> the CLASSIFICA / high-score screen). */
+/* 1 once the player has caught the 7th recipe piece (ObjNr 59) that drops
+ * when the World-1 boss is defeated. The host then ends the level (-> the
+ * CLASSIFICA / high-score screen). */
 int fa_beh_recipe_done(const fa_beh *b);
 
 #ifdef __cplusplus

@@ -7,10 +7,10 @@ RGB565 framebuffer, and maps two Npads into the engine's controller model.
 Build inside the pinned devkitPro Docker image from the repository root:
 
 ```sh
-make -C switch
+make -C platform/switch
 ```
 
-The output is `switch/freshadventures.nro`.
+The output is `platform/switch/freshadventures.nro`.
 
 ## Assets and deploy
 

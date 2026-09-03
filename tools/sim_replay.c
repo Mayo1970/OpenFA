@@ -1,5 +1,5 @@
 /*
- * sim_replay.c - headless deterministic driver for the RRR-34 loop.
+ * sim_replay.c - headless deterministic driver for the fixed-timestep loop.
  *
  * A replay file is plain text, one frame per line:
  *     <frame_dt_ns> <input_mask>
@@ -10,8 +10,7 @@
  *   sim_replay record <seed> <frames>  write a replay to stdout
  *
  * Two `run` passes over the same file must print the same hash, on any
- * platform. This is the tool RRR-102 will use to check the port against the
- * oracle once the real simulation is in.
+ * platform.
  */
 #include "fa/fa_loop.h"
 #include "../tests/refsim.h"

@@ -1,21 +1,21 @@
 /*
- * fa_backend_sdl2.c - SDL2 desktop backend (RRR-41)
+ * fa_backend_sdl2.c - SDL2 desktop backend
  *
  * Built only when the CMake option FA_WITH_SDL2 is on and SDL2 is found
  * (FA_HAVE_SDL2 defined). Without it the whole file compiles to two stubs so
  * the core still links and fa_platform_create falls back to the null backend.
  *
  * Maps the platform interface to SDL2:
- *   window     an 800x600 window (RRR-41 AC1); a letterboxed, optionally
- *              integer-scaled RGB565 streaming texture, so the pixel output
- *              matches the original surface exactly (RRR-13).
+ *   window     an 800x600 window; a letterboxed, optionally integer-scaled
+ *              RGB565 streaming texture, so the pixel output matches the
+ *              original surface exactly.
  *   input      SDL scancodes -> DirectInput (DIK) codes for the keyboard
- *              array; mouse motion / buttons -> the menu pointer (RRR-40);
+ *              array; mouse motion / buttons -> the menu pointer;
  *              SDL_GameController -> the platform-neutral pad state.
- *   audio      SDL_AudioDeviceID + SDL_QueueAudio, S16 stereo at 44100
- *              (RRR-30 output format). No callback thread; the loop pushes.
- *   timing     SDL_GetPerformanceCounter for now_ns, independent of vsync
- *              (RRR-41 AC4); vsync is left off and the loop owns the cadence.
+ *   audio      SDL_AudioDeviceID + SDL_QueueAudio, S16 stereo at 44100.
+ *              No callback thread; the loop pushes.
+ *   timing     SDL_GetPerformanceCounter for now_ns, independent of vsync;
+ *              vsync is left off and the loop owns the cadence.
  */
 #include "fa/fa_platform.h"
 #include "fa/fa_input.h"
@@ -197,7 +197,7 @@ static void sdl_sync_controller(sdl_state *s, struct fa_input *in)
                    fa_input_pad_axis_slot(in, 0, FA_PAD_AXIS_LEFT_Y));
 }
 
-/* SDL scancode -> DIK. The keys the port binds (RRR-40), the common gameplay
+/* SDL scancode -> DIK. The keys the port binds, the common gameplay
  * set, and the full A-Z / 0-9 / space / '-' / '.' / Backspace range needed by
  * the high-score name field; everything else is left 0. */
 static int sc_to_dik(SDL_Scancode sc)
@@ -431,7 +431,7 @@ int fa_backend_sdl2_create(fa_platform *p, const fa_platform_cfg *cfg)
     if (!s->win) goto fail;
 
     /* No SDL_RENDERER_PRESENTVSYNC: the fixed-timestep loop owns cadence
-     * and timing must not depend on the refresh (RRR-41 AC4). */
+     * and timing must not depend on the refresh. */
     s->ren = SDL_CreateRenderer(s->win, -1, SDL_RENDERER_ACCELERATED);
     if (!s->ren) s->ren = SDL_CreateRenderer(s->win, -1, 0);
     if (!s->ren) goto fail;

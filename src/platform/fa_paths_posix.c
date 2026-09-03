@@ -1,7 +1,7 @@
 /*
- * fa_paths_posix.c - the per-user writable directory on POSIX (RRR-39).
+ * fa_paths_posix.c - the per-user writable directory on POSIX.
  *
- * ENGINE-ARCH section 8: the port redirects Save/, Log/ and generated files
+ * The port redirects Save/, Log/ and generated files
  * to a per-user path. On POSIX that is $XDG_DATA_HOME/<app>, else
  * $HOME/.local/share/<app> (XDG Base Directory spec). The directory tree is
  * created if missing.

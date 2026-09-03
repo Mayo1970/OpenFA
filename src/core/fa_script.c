@@ -1,7 +1,7 @@
 /*
- * fa_script.c - Lua 4.0 assignment-subset evaluator (RRR-36)
- * See include/fa/fa_script.h for the model, the RRR-11 basis, and the
- * decision record (purpose-built, not a vendored interpreter).
+ * fa_script.c - Lua 4.0 assignment-subset evaluator
+ * See include/fa/fa_script.h for the model (purpose-built, not a vendored
+ * interpreter).
  */
 #include "fa/fa_script.h"
 

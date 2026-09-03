@@ -1,14 +1,12 @@
 /*
- * fa_audio.h - software mixer, resampler and event layer (RRR-46)
+ * fa_audio.h - software mixer, resampler and event layer
  *
- * Parity basis: RRR-9 (the DirectSound streaming timer is not the sim clock),
- * RRR-30 (the five source PCM formats), and the audio disasm trace
- * RRR-46/audio-disasm.md (PL-114..120). The original drives a C_DirectSound
- * object with a FIXED channel layout and NO priority system:
+ * The original drives a C_DirectSound object with a FIXED channel layout and
+ * NO priority system:
  *
- *   - 200 sample SLOTS, load-on-demand, first free slot, no name table
- *     (PL-114/115). The caller owns the name -> slot id mapping.
- *   - 19 mixer channels (PL-116):
+ *   - 200 sample SLOTS, load-on-demand, first free slot, no name table.
+ *     The caller owns the name -> slot id mapping.
+ *   - 19 mixer channels:
  *       0..15  resident SFX lanes - specific sounds go to specific lanes
  *       16     the one music stream, looping
  *       17     player / ambient voice, one-shot
@@ -17,13 +15,13 @@
  *     the swap by one timer tick through a single pending slot; the audible
  *     result is a replace). Different channels simply mix. There is no
  *     priority, no stealing, no queue. A player-hit SFX (lanes 0/1) mixes
- *     with a voice line on lane 17 (PL-117).
- *   - The source PCM format is passed straight to DirectSound (PL-120); a
+ *     with a voice line on lane 17.
+ *   - The source PCM format is passed straight to DirectSound; a
  *     non-DirectSound port must convert the five formats itself. This module
  *     decodes + rate-converts to 44100 / stereo and mixes in software.
  *
  * The music channel is streamed from the source WAV (a 15 MB track would be
- * ~120 MB at 44100/stereo/16 - RRR-38 residency). SFX and voice clips are
+ * ~120 MB at 44100/stereo/16). SFX and voice clips are
  * short and are fully decoded.
  *
  * Timing: fa_audio_mix() is pulled once per RENDERED frame from the fa_app
@@ -42,7 +40,7 @@ extern "C" {
 
 #define FA_AUDIO_RATE       44100
 
-/* Channel layout (PL-116). */
+/* Channel layout. */
 #define FA_AUDIO_SFX_LANES  16          /* channels 0..15 */
 #define FA_CH_MUSIC         16
 #define FA_CH_VOICE         17
@@ -51,8 +49,8 @@ extern "C" {
 
 /*
  * Game audio events. Each maps to {file, channel, loop} in the table in
- * fa_audio.c, lifted from RRR-46/audio-disasm.md section 5. Entries marked
- * TENTATIVE there (glide) or still unknown play nothing (logged once).
+ * fa_audio.c. Entries marked TENTATIVE there (glide) or still unknown play
+ * nothing (logged once).
  */
 typedef enum fa_snd_event {
     FA_SND_NONE = 0,
@@ -74,8 +72,8 @@ typedef enum fa_snd_event {
     FA_SND_JUMP_M,         /* alsf01.wav lane 1 */
     FA_SND_THROW_P,        /* alsf07.wav lane 0 */
     FA_SND_THROW_M,        /* alsf07.wav lane 1 */
-    FA_SND_GLIDE,          /* alsf02.wav lane 0 - penguin flight, owner-confirmed */
-    FA_SND_PICKUP,         /* alsf09.wav lane 2 - collectible (PL-134) */
+    FA_SND_GLIDE,          /* alsf02.wav lane 0 - penguin flight */
+    FA_SND_PICKUP,         /* alsf09.wav lane 2 - collectible */
     FA_SND_PUSH,           /* schieben.wav lane 6 */
     FA_SND_ENEMY_DEFEAT,   /* alsf04.wav lane 3 */
     FA_SND_ENEMY_KNOCK,    /* alsf05.wav lane 4 */
@@ -100,8 +98,7 @@ typedef enum fa_snd_event {
     FA_SND_HIT_P,          /* pi0005.wav lane 0 - also the fatal hit */
     FA_SND_HIT_M,          /* ms0007.wav lane 1 - also the fatal hit */
     FA_SND_MENU_HOVER,     /* alsf08.wav - world / option hover */
-    /* RRR-61: the World-3 (FABBRICA) robot-boss cues (preload 0x4122F9..,
-     * owner-confirmed in playtest). */
+    /* the World-3 (FABBRICA) robot-boss cues (preload 0x4122F9..). */
     FA_SND_W3_BUTTON,      /* w3sf07.wav lane 3 - a button is pushed         */
     FA_SND_W3_PIPE,        /* w3sf08.wav lane 4 - the pipe drops             */
     FA_SND_W3_BOSS_HIT,    /* w3sf09.wav lane 4 - the pipe hits the robot    */
@@ -110,23 +107,22 @@ typedef enum fa_snd_event {
     FA_SND_W3_BOSS_DEFEAT, /* w3sf04a.wav lane 9 - the robot is defeated     */
     FA_SND_W3_BOSS_KO,     /* w3sf04b.wav lane 10 - RBKO frame 56 (exe ch10) */
 
-    /* RRR-62: the World-4 (VALLE) octopus/KRAKE boss cues (preload
-     * 0x4123C1.., 0x40CD70 handler). Both on lane 9, one-shot. */
+    /* the World-4 (VALLE) octopus/KRAKE boss cues (preload 0x4123C1..,
+     * 0x40CD70 handler). Both on lane 9, one-shot. */
     FA_SND_W4_BOSS_DRINK,  /* w4sf01.wav lane 9 - the octopus drinks milk (vulnerable) */
     FA_SND_W4_BOSS_SHOT,   /* w4sf02.wav lane 9 - the octopus fires a milk particle    */
 
-    /* RRR-60: the World-2 (MONTAGNA) yeti-boss cues (preload 0x4122C8..,
+    /* the World-2 (MONTAGNA) yeti-boss cues (preload 0x4122C8..,
      * 0x40E350 handler). */
     FA_SND_W2_BOSS_LAND,   /* w2sf04.wav lane 9  - the yeti lands from a hop  */
     FA_SND_W2_BOSS_HURT,   /* w2sf05.wav lane 10 - the yeti takes a hit (fr69) */
 
     /*
-     * Idle voice lines (player-anim-disasm-2.md section 1; state-1 handler
-     * 0x417BD5 / state-17 handler 0x418DA4). Each idle fidget starts a
-     * one-shot on the voice lane (channel 0x11). Penguin idle A picks A1/A2
-     * with rng()&1; penguin idle B is the yawn. Fettalatte's idle picks 1/2
-     * with rng()&1. .data strings 0x456BC0 / 0x456BE4 / 0x456C08 / 0x456B54 /
-     * 0x456B78 (Codex-confirmed against JR_FERRERO.exe).
+     * Idle voice lines (state-1 handler 0x417BD5 / state-17 handler
+     * 0x418DA4). Each idle fidget starts a one-shot on the voice lane
+     * (channel 0x11). Penguin idle A picks A1/A2 with rng()&1; penguin idle B
+     * is the yawn. Fettalatte's idle picks 1/2 with rng()&1. .data strings
+     * 0x456BC0 / 0x456BE4 / 0x456C08 / 0x456B54 / 0x456B78.
      */
     FA_SND_PENGUIN_IDLE_A1,  /* voices/ita/pi0001.wav - penguin idle A (talk) */
     FA_SND_PENGUIN_IDLE_A2,  /* voices/ita/pi0002.wav - penguin idle A (talk) */
@@ -139,14 +135,13 @@ typedef enum fa_snd_event {
 
 typedef struct fa_audio fa_audio;
 
-/* `gdata_dir` is the GData root (DIRECT GDATA LOADER, RRR-33). Returns NULL
- * on allocation failure. */
+/* `gdata_dir` is the GData root. Returns NULL on allocation failure. */
 fa_audio *fa_audio_create(const char *gdata_dir);
 void      fa_audio_destroy(fa_audio *a);
 
 /*
  * Volume. Option.ini line 21 = music (global 0x45ECC0), line 22 = sound
- * (0x45EFE4), both 0..100 (PL-119; corrects RRR-23's swapped labels). The
+ * (0x45EFE4), both 0..100. The
  * option screen maps 0..100 onto roughly -40..0 dB (music) / -35..0 dB
  * (sound); `*_ini` reproduces that curve. `set_master` is an extra global
  * scale for the port (a --vol flag / mute), not an original control.
@@ -171,7 +166,7 @@ void fa_audio_set_channel_gain(fa_audio *a, int channel, int gain_256);
 /*
  * 1 when `channel` is producing sound (or has a start pending). This is the
  * fa_audio_channel_busy / exe 0x4231E5 test the character-swap and boss state
- * machines poll (PL-117).
+ * machines poll.
  */
 int  fa_audio_channel_busy(const fa_audio *a, int channel);
 

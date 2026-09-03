@@ -1,5 +1,5 @@
 /*
- * fa_loop.c - fixed-timestep simulation loop (RRR-34)
+ * fa_loop.c - fixed-timestep simulation loop
  * See include/fa/fa_loop.h for the model and the parity basis.
  */
 #include "fa/fa_loop.h"

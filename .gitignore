@@ -9,7 +9,7 @@ dist/
 GData/
 
 # Switch homebrew build artifacts (keep the source tracked)
-switch/build/
+platform/switch/build/
 *.nro
 *.nso
 *.nacp

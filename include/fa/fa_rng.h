@@ -1,5 +1,5 @@
 /*
- * fa_rng.h - the game's pseudo-random number generator (RRR-52)
+ * fa_rng.h - the game's pseudo-random number generator
  *
  * Parity basis: JR_FERRERO.exe rand/srand, identified by hand off jr_disasm.txt.
  *
@@ -12,14 +12,12 @@
  * keeps ONE global stream. It is seeded once at start-up (fcn @0x42AE27:
  * srand(wall_clock_field & 0xFFFF)), so the original's sequence is different
  * on every run. Callers reduce a draw with a signed `cdq; idiv` - i.e.
- * `rand() % n` (verified at 0x4193CE..0x4193DB and the enemy handlers, PL-137).
+ * `rand() % n` (verified at 0x4193CE..0x4193DB and the enemy handlers).
  *
- * The port keeps the exact algorithm (AC1) but seeds it deterministically
- * (a fixed default, override with fa_rng_seed): the fixed-timestep sim must
- * replay bit-for-bit (RRR-34). Every fa_rng instance is independent; the game
- * layer owns one shared instance to mirror the exe's single stream.
- *
- * PL-140.
+ * The port keeps the exact algorithm but seeds it deterministically (a fixed
+ * default, override with fa_rng_seed): the fixed-timestep sim must replay
+ * bit-for-bit. Every fa_rng instance is independent; the game layer owns one
+ * shared instance to mirror the exe's single stream.
  */
 #ifndef FA_RNG_H
 #define FA_RNG_H

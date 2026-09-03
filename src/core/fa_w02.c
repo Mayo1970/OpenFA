@@ -1,5 +1,5 @@
 /*
- * fa_w02.c - .W02 pool container (RRR-42). Ports RRR-19/w02_pool.c.
+ * fa_w02.c - .W02 pool container. See fa_w02.h.
  */
 #include "fa/fa_w02.h"
 
@@ -33,7 +33,7 @@ static int parse(fa_w02 *o)
     o->count = n;
 
     /* Validate: N records forward from 0x119 must agree with the pointer
-     * table and fill the file exactly (RRR-19 w02_walk). */
+     * table and fill the file exactly. */
     const uint8_t *ptab = o->buf + o->len - (size_t)n * 4;
     uint32_t off = FA_W02_HEADER_SIZE;
     for (int i = 0; i < n; i++) {

@@ -1,12 +1,11 @@
 /*
- * fa_map.h - level (.W02 chunk 0) loader (RRR-42)
+ * fa_map.h - level (.W02 chunk 0) loader
  *
  * Reverse-engineered from JR_FERRERO.exe (objdump -d): LoadMap fcn.00432cd0,
  * LoadMapInfo fcn.00432fe0, the render-runtime prep fcn.00432840, the grid
  * render loop fcn.00433110, the entry lookup fcn.004340c0 and the coarse
  * solid query fcn.00434180. Cross-checked against all 12 shipped
- * GData\Maps\*.W02. See RRR-42-report.md and grid-cell-disasm.md for the
- * evidence trail; PL-074..PL-077, PL-090..PL-094.
+ * GData\Maps\*.W02.
  *
  * CONFIRMED
  *   - The playable level is always chunk 0 of the MAPPOOL .W02 (LoadMap runs
@@ -14,7 +13,7 @@
  *     40x30 editor scratch maps.
  *   - Chunk 0 payload = [ 348-byte MapInfo ][ grid_bytes grid ][ tail ].
  *     LoadMapInfo does fread(hdr, 0x15c, 1, f) then reads u32 @ hdr+0x132
- *     (= +306) bytes of grid. The tail is entity data (RRR-50).
+ *     (= +306) bytes of grid. The tail is entity data.
  *   - MapInfo little-endian fields:
  *       @0x104 (260)  u16[5]  background .W01 frame ids. ids 0..3 are the
  *                             tile ATLAS frames (each 640x480); id 4 is the
@@ -26,14 +25,14 @@
  *       @0x132 (306)  u32     grid byte count = grid_w * grid_h * 24
  *       @0x15B (347)  u8      plane count (8 in every shipped map)
  *
- * GRID LAYOUT (PL-090, confirmed against the render loop and all 12 files)
+ * GRID LAYOUT (confirmed against the render loop and all 12 files)
  *   The grid is PLANE-MAJOR, not an array of 24-byte cells:
  *       grid = plane[8] of (grid_h * grid_w) entries, each entry 3 bytes.
  *       entry(plane, x, y) = grid + plane*(3*grid_w*grid_h) + 3*(y*grid_w + x)
  *   The plane number is the draw / Z order (0 back .. 7 front); the render
  *   loop at 0x4332ec walks plane 0..plane_count-1.
  *
- * ENTRY (3 bytes, PL-091, confirmed at 0x4333d0 / 0x434200)
+ * ENTRY (3 bytes, confirmed at 0x4333d0 / 0x434200)
  *       +0  u8   attr
  *       +1  u16  packed  (little-endian)
  *   packed == 0xFFFF  -> empty. attr alone is NOT authoritative for
@@ -41,13 +40,25 @@
  *       tile = packed & 0x01FF        (9-bit index into the chosen atlas)
  *       code = (packed >> 9) & 0x7F   collision / behaviour code, queried by
  *                                     fcn.00434200; code > 50 -> not drawn
- *   attr bits (PL-092):
+ *   code bits:
+ *       0x01  CLIMBABLE / vine. The only bit IsLadderAtOrNear fcn.0041A830
+ *             tests, at all three of its probe points; the climb state's
+ *             downward floor test at 0x418810 uses it too.
+ *       0x02  ONE-WAY PLATFORM, top row only. The tile collision builder
+ *             fcn.00434240 tests code & 2 at 0x4343C4; when set it yields a
+ *             solid result only where the tile-local Y remainder is 0
+ *             (0x4343CB). The climb head probe passes code & 3, so the kid
+ *             climbs straight up through one of these.
+ *       0x04  unknown. No caller ever masks 0x04 against fcn.00434200. Do
+ *             NOT infer it from the &0x7 / &0x5 masks in fcn.00431DB0 - those
+ *             apply to the DERIVED byte fcn.00434240 builds, not to this code.
+ *   attr bits:
  *       0x07  atlas frame select, 0..3 (loader rejects >= 4)
  *       0x08  flip X                 0x10  flip Y   (0x18 = both)
  *       0x20  coarse-solid bit  (the value fcn.00434180 returns)
  *       0x40  suppress: skip drawing AND make the collision queries bail
  *             (no shipped entry sets it)
- *       0x80  HAZARD tile (RRR-53): fcn.0041A290, run every frame from the
+ *       0x80  HAZARD tile: fcn.0041A290, run every frame from the
  *             player state-machine tail, queries plane 2 at the player origin
  *             - a non-empty cell with 0x80 set deals 20 damage + 120 i-frames
  *             (when not invulnerable), plays the character hit sound, and
@@ -55,7 +66,7 @@
  *             band, Welt2-4 hazard pools. (Earlier guess: "alt collision".)
  *   There is no attr animation bit; the grid is never written after load.
  *
- * SOURCE RECT (PL-093, confirmed at 0x4333d0..0x43341b)
+ * SOURCE RECT (confirmed at 0x4333d0..0x43341b)
  *       cols   = 640 / tile_w            (this+0x1733; normally 20)
  *       src_x  = (tile % cols) * tile_w
  *       src_y  = (tile / cols) * tile_h
@@ -63,10 +74,8 @@
  *   511) is a collision-only / invisible record; the renderer does not draw
  *   it (fa_render skips it; the original relied on the DirectDraw no-op).
  *
- * STILL UNKNOWN (carried; owner-side, needs the RRR-6 oracle)
- *   - the designer names of code bits 0/1 (bit 1 has a top-row-only path in
- *     the pixel query - probably a one-way platform). attr 0x80 = hazard
- *     (RRR-53).
+ * STILL UNKNOWN
+ *   - code bit 2 (0x04). See the code-bit list above: no caller reads it.
  *   - MapInfo @0x116 u16[9] (nine 0x12-byte render-layer records at runtime),
  *     @0x126, @0x128.
  *   - the per-plane parallax / scroll factor (fa_render scrolls 1:1).
@@ -102,7 +111,7 @@ struct fa_w02;
 #define FA_MAP_ATTR_FLIPY   0x10u
 #define FA_MAP_ATTR_SOLID   0x20u
 #define FA_MAP_ATTR_SUPPRESS 0x40u
-#define FA_MAP_ATTR_HAZARD  0x80u   /* RRR-53: fcn.0041A290 - hurts the player */
+#define FA_MAP_ATTR_HAZARD  0x80u   /* fcn.0041A290 - hurts the player        */
 
 typedef struct fa_map_info {
     int      tile_w, tile_h;       /* 32, 32                              */
@@ -119,7 +128,7 @@ typedef struct fa_map_info {
 typedef struct fa_map {
     fa_map_info info;
     uint8_t    *grid;              /* grid_bytes, owned, plane-major       */
-    uint8_t    *tail;              /* entity data, owned (RRR-50)          */
+    uint8_t    *tail;              /* entity data, owned                  */
     uint32_t    tail_size;
     int         world_w, world_h;  /* grid_w*tile_w, grid_h*tile_h (px)    */
 } fa_map;
@@ -147,13 +156,13 @@ typedef struct fa_map_entry {
 } fa_map_entry;
 
 /* Entry of plane `plane` (0..7) at tile (cx, cy). An out-of-range plane or
- * cell returns { 0, 0xFFFF } (empty). Plane-major addressing (PL-090). */
+ * cell returns { 0, 0xFFFF } (empty). Plane-major addressing. */
 fa_map_entry fa_map_cell_entry(const fa_map *m, int cx, int cy, int plane);
 
 /* 1 if any plane has a non-empty entry at (cx, cy). */
 int fa_map_cell_occupied(const fa_map *m, int cx, int cy);
 
-/* --- entry decode (PL-091..093) -------------------------------------- */
+/* --- entry decode --------------------------------------------------- */
 
 static inline int fa_map_entry_empty(fa_map_entry e)
 { return e.packed == FA_MAP_ENTRY_EMPTY; }
@@ -184,7 +193,7 @@ static inline int fa_map_entry_drawn(fa_map_entry e)
            fa_map_entry_atlas(e) < 4;
 }
 
-/* --- collision (fcn.00434180, PL-094) ------------------------------- */
+/* --- collision (fcn.00434180) -------------------------------------- */
 
 /*
  * The player/physics-facing coarse solid query (fcn.00434180 verbatim). Maps
@@ -199,12 +208,12 @@ static inline int fa_map_entry_drawn(fa_map_entry e)
 int fa_map_solid_at(const fa_map *m, int plane, int world_x, int world_y);
 
 /* 1 if the world pixel sits on a ladder tile (plane-2 grid entry, collision
- * code bit 0 set - PL-102). Used by the climb state. */
+ * code bit 0 set). Used by the climb state. */
 int fa_map_ladder_at(const fa_map *m, int world_x, int world_y);
 
 /*
- * Solidity class of the terrain (plane 2) at a world pixel, for RRR-44
- * (fa_collide.h). PL-094 / PL-110:
+ * Solidity class of the terrain (plane 2) at a world pixel, for
+ * fa_collide.h:
  *     0  FA_SOLID_NONE   - empty, suppressed, or a non-solid entry
  *     1  FA_SOLID_FULL   - attr & 0x20 set (fcn.00434180 "stand on this")
  *     2  FA_SOLID_ONEWAY - collision code & 2 set: the one-way / drop-through

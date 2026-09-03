@@ -1,8 +1,8 @@
 /*
- * fa_loop.h - fixed-timestep simulation loop (RRR-34)
+ * fa_loop.h - fixed-timestep simulation loop
  *
- * Parity reference (RRR-9, PL-033 / PL-034): the original game runs exactly
- * one simulation tick per rendered frame, held to the monitor vertical
+ * The original game runs exactly one simulation tick per rendered frame,
+ * held to the monitor vertical
  * refresh, 60 Hz on a standard display, 60 Hz fallback if the boot-time
  * measurement fails. Frame-locked behaviour (jump arcs, animation timing,
  * RNG cadence) is defined at 60 ticks per second.
@@ -53,8 +53,7 @@ extern "C" {
  *  tick   - absolute tick index, 0-based, monotonic.
  *  input  - the frame input pointer passed to fa_loop_frame, unchanged.
  *           Every tick in one frame sees the same pointer (input is latched
- *           once per frame, as RRR-14 / RRR-9 describe: one poll per loop
- *           iteration).
+ *           once per frame: one poll per loop iteration).
  *  user   - the user pointer from fa_loop_init.
  * The step MUST NOT read a wall clock or a frame counter. Its only time
  * source is the fixed tick.

@@ -1,9 +1,9 @@
 /*
- * fa_options.c - the option-screen interaction model (RRR-47). See fa_options.h.
+ * fa_options.c - the option-screen interaction model. See fa_options.h.
  */
 #include "fa/fa_options.h"
 
-/* 800x600 knob-origin X range per slider (menu-disasm.md section 2). */
+/* 800x600 knob-origin X range per slider. */
 static void slider_range(fa_slider s, int *lo, int *span)
 {
     if (s == FA_SLIDER_MUSIC) { *lo = 45;  *span = 179; }

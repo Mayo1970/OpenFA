@@ -1,5 +1,5 @@
 /*
- * fa_hud.c - the in-level status display (RRR-51 AC5). See fa_hud.h.
+ * fa_hud.c - the in-level status display. See fa_hud.h.
  *
  * Reverse-engineered from JR_FERRERO.exe by hand off jr_disasm.txt:
  *   - the sheet loader at 0x4083f0..0x4086d0 (LoadW01 0x41e7eb into the
@@ -38,7 +38,7 @@ struct fa_hud {
     hud_sheet actors;     /* Actors.w01, 2 frames */
     hud_sheet digit;      /* Schrift.w01, 10 frames 0..9 */
 
-    /* RRR-59: the boss bar - swaps in for the 6 item icons in a boss arena */
+    /* the boss bar - swaps in for the 6 item icons in a boss arena */
     hud_sheet boss_frame; /* Boss/BossInterface.w01, 1 frame */
     hud_sheet boss_fill;  /* Boss/Energy.w01, 10 frames (one per HP)        */
     hud_sheet boss_pic;   /* Boss/Bosspics.w01, 4 frames (one per boss)     */
@@ -127,7 +127,7 @@ fa_hud *fa_hud_load(const char *gdata_dir)
         snprintf(rel, sizeof rel, "%s/Item%d.w01", base, i + 1);
         sheet_load(&h->item[i], gdata_dir, rel);
     }
-    /* RRR-59: the boss bar sheets (optional - absent in a non-boss install) */
+    /* the boss bar sheets (optional - absent in a non-boss install) */
     snprintf(rel, sizeof rel, "%s/Boss/BossInterface.w01", base);
     sheet_load(&h->boss_frame, gdata_dir, rel);
     snprintf(rel, sizeof rel, "%s/Boss/Energy.w01", base);

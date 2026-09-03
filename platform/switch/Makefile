@@ -12,7 +12,7 @@ endif
 TOPDIR      ?= $(CURDIR)
 TARGET      := freshadventures
 BUILD       := build
-SOURCES     := source ../src/app ../src/core ../src/game
+SOURCES     := source ../../src/app ../../src/core ../../src/game
 DATA        := data
 INCLUDES    :=
 
@@ -37,10 +37,10 @@ LIBS        := -lSDL2 -lEGL -lglapi -ldrm_nouveau -lnx -lpthread -lm
 # Only these platform files belong in the Switch target. In particular, do
 # not compile the SDL2 or desktop clock/path backends into the NRO.
 SWITCH_PLATFORM_SOURCES := \
-	../src/platform/fa_platform.c \
-	../src/platform/fa_backend_null.c \
-	../src/platform/fa_backend_switch.c \
-	../src/platform/fa_paths_switch.c
+	../../src/platform/fa_platform.c \
+	../../src/platform/fa_backend_null.c \
+	../../src/platform/fa_backend_switch.c \
+	../../src/platform/fa_paths_switch.c
 
 LIBDIRS     := $(PORTLIBS) $(LIBNX)
 
@@ -52,7 +52,7 @@ ifneq ($(BUILD),$(notdir $(CURDIR)))
 export OUTPUT   := $(CURDIR)/$(TARGET)
 export TOPDIR   := $(CURDIR)
 export VPATH    := $(foreach dir,$(SOURCES),$(CURDIR)/$(dir)) \
-			   $(CURDIR)/../src/platform \
+			   $(CURDIR)/../../src/platform \
 			   $(foreach dir,$(DATA),$(CURDIR)/$(dir))
 export DEPSDIR  := $(CURDIR)/$(BUILD)
 
@@ -73,7 +73,7 @@ export HFILES_BIN := $(addsuffix .h,$(subst .,_,$(BINFILES)))
 
 export INCLUDE  := $(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
 			  $(foreach dir,$(LIBDIRS),-I$(dir)/include) \
-			  -I$(CURDIR)/../include \
+			  -I$(CURDIR)/../../include \
 			  -I$(CURDIR)/$(BUILD)
 export LIBPATHS := $(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 

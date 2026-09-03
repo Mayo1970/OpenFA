@@ -1,8 +1,7 @@
 /*
- * fa_wav.h - PCM RIFF/WAVE reader (RRR-46)
+ * fa_wav.h - PCM RIFF/WAVE reader
  *
- * Parity basis: RRR-30 section "Source survey" and PORTING_ANALYSIS 3.3. Every
- * shipped clip is uncompressed PCM RIFF/WAVE in one of five layouts:
+ * Every shipped clip is uncompressed PCM RIFF/WAVE in one of five layouts:
  *
  *     rate    ch  bits  count
  *     22050    1   16    159
@@ -25,7 +24,7 @@
  * The reader COPIES the data chunk into its own buffer at open time, so the
  * caller's file buffer can be freed immediately. A 15 MB music track is one
  * 15 MB copy - fa_audio streams from it rather than decoding the whole clip
- * to 44100/stereo (which would be ~8x larger); see RRR-38 residency.
+ * to 44100/stereo (which would be ~8x larger).
  */
 #ifndef FA_WAV_H
 #define FA_WAV_H

@@ -1,5 +1,5 @@
 /*
- * fa_credits.c - the credits sequence (RRR-54). See fa_credits.h.
+ * fa_credits.c - the credits sequence. See fa_credits.h.
  */
 #include "fa/fa_credits.h"
 #include "fa/fa_surface.h"

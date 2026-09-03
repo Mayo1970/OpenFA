@@ -1,6 +1,6 @@
 /*
- * fa_surface.c - RGB565 software surface and blitter (RRR-35)
- * See include/fa/fa_surface.h for the model and the RRR-13 / RRR-18 basis.
+ * fa_surface.c - RGB565 software surface and blitter
+ * See include/fa/fa_surface.h for the model.
  */
 #include "fa/fa_surface.h"
 
