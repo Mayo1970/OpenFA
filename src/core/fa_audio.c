@@ -149,7 +149,7 @@ struct fa_audio {
     fa_sfx_chan sfx[FA_AUDIO_SFX_LANES];  /* channels 0..15 */
     fa_stream   str[3];                   /* [0]=ch16 music [1]=ch17 [2]=ch18 */
 
-    uint32_t   warned;                   /* bitset of events already warned */
+    uint64_t   warned;                   /* bitset of events already warned */
 };
 
 /* ---- gdata path with the fa_menu-style case-fold fallback ---------- */
@@ -238,6 +238,13 @@ static const snd_def SND_TBL[FA_SND__COUNT] = {
      * exe ch 9). */
     [FA_SND_W2_BOSS_LAND]   = { "SDat/w2sf04.wav",             9, 0 },
     [FA_SND_W2_BOSS_HURT]   = { "SDat/w2sf05.wav",            10, 0 },
+    /* idle voice lines - channel 17 (voice), one-shot (player-anim-disasm-2
+     * section 1; Codex-confirmed .data strings). */
+    [FA_SND_PENGUIN_IDLE_A1] = { "SDat/voices/ita/pi0001.wav", FA_CH_VOICE, 0 },
+    [FA_SND_PENGUIN_IDLE_A2] = { "SDat/voices/ita/pi0002.wav", FA_CH_VOICE, 0 },
+    [FA_SND_PENGUIN_IDLE_B]  = { "SDat/gaehnen.wav",           FA_CH_VOICE, 0 },
+    [FA_SND_MILCH_IDLE_1]    = { "SDat/voices/ita/ms0001.wav", FA_CH_VOICE, 0 },
+    [FA_SND_MILCH_IDLE_2]    = { "SDat/voices/ita/ms0002.wav", FA_CH_VOICE, 0 },
 };
 
 /* ================================================================== *
@@ -388,8 +395,8 @@ int fa_audio_event(fa_audio *a, fa_snd_event ev)
     if (!a || ev <= FA_SND_NONE || ev >= FA_SND__COUNT) return -1;
     const snd_def *d = &SND_TBL[ev];
     if (!d->file || d->channel < 0) {
-        if (!(a->warned & (1u << ev))) {
-            a->warned |= (1u << ev);
+        if (!(a->warned & (1ull << ev))) {
+            a->warned |= (1ull << ev);
             fprintf(stderr, "fa_audio: event %d unresolved "
                             "(RRR-46/audio-disasm.md)\n", (int)ev);
         }

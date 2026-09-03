@@ -20,13 +20,15 @@
  *             backend; a fixed synthetic step on the headless one).
  *   wait      optional frame-cap sleep; a no-op is allowed.
  *
- * Two backends ship in the core so a test or tool needs no window:
+ * Backends ship in the core so a test or tool needs no window:
  *   fa_backend_null   headless. now_ns advances a fixed 1/60 s per pump, so a
  *                     bounded run is deterministic and finite; present()
  *                     folds the framebuffer into an FNV-1a-32 hash.
  *   fa_backend_sdl2   the desktop backend (RRR-41). Built only when SDL2 is
  *                     found; otherwise fa_backend_sdl2_create returns -1 and
  *                     fa_platform_create falls back to the null backend.
+ *   fa_backend_switch libnx's software framebuffer and Npad input for the
+ *                     Nintendo Switch application target.
  */
 #ifndef FA_PLATFORM_H
 #define FA_PLATFORM_H
@@ -91,6 +93,9 @@ int fa_backend_sdl2_create(fa_platform *p, const fa_platform_cfg *cfg);
 
 /* 1 if this build has the SDL2 backend compiled in, else 0. */
 int fa_backend_sdl2_available(void);
+
+/* Nintendo Switch/libnx backend. Returns 0 on success, -1 on init failure. */
+int fa_backend_switch_create(fa_platform *p, const fa_platform_cfg *cfg);
 
 /* Try the SDL2 backend, fall back to the null backend. Returns 0 or -1. */
 int fa_platform_create(fa_platform *p, const fa_platform_cfg *cfg);

@@ -174,6 +174,8 @@ typedef struct fa_player {
     int      idle_timer;     /* stand ticks until the next idle roll        */
     int      idle_kind;      /* 0 none, 1 idle A, 2 idle B - for the pose   */
     int      idle_play;      /* ticks the current idle clip has left        */
+    int      idle_sound;     /* 0/1 sub-roll for the idle voice line        */
+    int      in_boss;        /* 1 in a boss arena (exe 0x4DABD4 >= 4)       */
 
     /* character swap (PL-104) */
     int      swap_timer;     /* > 0 = swap running, all input locked        */
@@ -218,6 +220,11 @@ typedef int (*fa_ladder_fn)(int px, int py, void *ctx);
 /* Initialise at (spawn_x, spawn_y) in whole pixels, facing right, standing.
  * Uses FA_PLAYER_DEFAULT_TUNING; change p->t afterwards to retune. */
 void fa_player_init(fa_player *p, int spawn_x, int spawn_y);
+
+/* Mark the player as inside (1) or outside (0) a boss arena. The exe's idle
+ * roll (0x417C95 / 0x418EA3) reads world index 0x4DABD4: >= 4 (a boss stage)
+ * forces the penguin to idle B and suppresses Fettalatte's idle entirely. */
+void fa_player_set_boss_arena(fa_player *p, int in_boss);
 
 void fa_player_set_ground(fa_player *p, fa_ground_fn fn, void *ctx);
 void fa_player_set_ladder(fa_player *p, fa_ladder_fn fn, void *ctx);

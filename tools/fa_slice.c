@@ -63,6 +63,8 @@
 #if defined(_WIN32)
 #  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
+#elif defined(__SWITCH__)
+#  include <switch.h>
 #endif
 
 typedef struct {
@@ -132,6 +134,7 @@ typedef struct {
     int       mute;         /* --mute: create no mixer                     */
     int       vol;          /* --vol 0..255, <0 = default (full)          */
     int       swap_was;     /* previous tick's FA_PST_SWAP flag            */
+    int       idle_was;     /* previous tick's s->pl.idle_kind (voice edge)*/
     int       jump_was;     /* previous tick's FA_PST_JUMP flag            */
     int       thr_was;      /* previous tick's throw_anim > 0              */
     int       glide_was;    /* previous tick's penguin glide flag         */
@@ -729,6 +732,10 @@ static void wire_level(slice *s)
     fa_player_set_ladder(&s->pl2, slice_ladder, &s->map);
     fa_player_set_solid(&s->pl2, slice_solid, &s->coll);
     fa_player_set_pushable(&s->pl2, slice_pushable, s->ents);
+    /* boss arena (exe 0x4DABD4 >= 4): penguin idles only the yawn, Fettalatte
+     * does not idle at all. */
+    fa_player_set_boss_arena(&s->pl, s->in_end);
+    fa_player_set_boss_arena(&s->pl2, s->in_end);
     if (s->ents)
         fa_entity_set_terrain(s->ents, slice_terrain, &s->coll);
 
@@ -738,6 +745,7 @@ static void wire_level(slice *s)
     s->freemove = 0;             /* DEV: always start a level clipped */
     s->death_player = 0;
     s->swap_was = s->jump_was = s->thr_was = s->glide_was = 0;
+    s->idle_was = 0;
     s->push_was = 0;
     s->kid_was_crouch = s->kid_rise = 0;
     s->kid_was_crouch2 = s->kid_rise2 = 0;
@@ -796,8 +804,8 @@ static const kid_clip PENGUIN_CLIPS[] = {
     { FA_CS_THROW_FWD,  233, 233, 260, 0 },  /* state 14/15 snowball (spawn f255) */
     { FA_CS_THROW_UP,   233, 233, 260, 0 },  /* same range; only trajectory differs */
     { FA_CS_KO,         150, 158, 162, 1 },  /* state 34/35 */
-    { FA_CS_IDLE_A,      65,  65,  69, 0 },  /* state 1 idle A (PL-101) */
-    { FA_CS_IDLE_B,      91,  91, 115, 0 },  /* state 1 idle B */
+    { FA_CS_IDLE_A,      65,  65,  69, 1 },  /* state 1 idle A - loops for the voice */
+    { FA_CS_IDLE_B,      91,  91, 115, 0 },  /* state 1 idle B (yawn) - one pass */
     { FA_CS_SWAP,        65,  65,  69, 1 },  /* switch: loops 65-69 for the voice line */
     { FA_CS_SWAP_END,    65,  65,  69, 1 },  /* penguin has no turn-back */
 };
@@ -814,9 +822,9 @@ static const kid_clip MILCH_CLIPS[] = {
     { FA_CS_THROW_FWD,  273, 273, 296, 0 },  /* state 30/31 snowball (spawn f291) */
     { FA_CS_THROW_UP,   273, 273, 296, 0 },
     { FA_CS_KO,          36,  44,  48, 1 },  /* state 36/37 */
-    { FA_CS_IDLE_B,     137, 146, 159, 0 },  /* state 17 idle (loop point 146) */
+    { FA_CS_IDLE_B,     137, 146, 150, 1 },  /* state 17 idle: lead 137, loop 146-150 */
     { FA_CS_SWAP,       137, 146, 150, 1 },  /* switch: turn to camera, loop 146-150 */
-    { FA_CS_SWAP_END,   150, 150, 159, 0 },  /* the turn-back, once, at the end */
+    { FA_CS_SWAP_END,   150, 150, 159, 0 },  /* the 150-159 turn-back (swap + idle tail) */
 };
 
 static void bind_kid(fa_cs_anim *a, const kid_clip *t, int n)
@@ -922,6 +930,12 @@ static void slice_update_kid_anim(slice *s, fa_player *p, int k,
     fa_cs_pose pose = kid_pose(p);
     if (pose == FA_CS_SWAP && (p->character & 1) &&
         p->swap_timer <= p->t.swap_end_c1)
+        pose = FA_CS_SWAP_END;
+    /* Fettalatte's idle ends with the same 150..159 turn-back as the swap:
+     * the exe extends the clip end to 159 once the voice line stops
+     * (0x418E0E). MILCH 150..159 = 10 frames * 2 ticks = 20. */
+    if (pose == FA_CS_IDLE_B && (p->character & 1) &&
+        p->idle_play > 0 && p->idle_play <= 20)
         pose = FA_CS_SWAP_END;
     int crouch = pose == FA_CS_CROUCH;
     if (*was_crouch && !crouch && p->on_ground) *rise = 14;
@@ -1432,6 +1446,9 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                 if (s->ammo <= 0) m2 &= ~(1u << FA_ACT_FIRE);
                 fa_player_tick(&s->pl2, m2);
             }
+            /* co-op: only player 1 plays idle fidgets (owner decision). */
+            s->pl2.idle_kind = s->pl2.idle_play = s->pl2.idle_sound = 0;
+            s->pl2.idle_timer = s->pl2.t.idle_delay;
         }
         /* the swap voice line starts when the swap starts; the swap lock
          * length is that line's duration (PL-104). */
@@ -1463,11 +1480,28 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                 fa_audio_event(s->audio, FA_SND_GLIDE);
             if (!glide_now && s->glide_was)         /* exe stops lane 0 on */
                 fa_audio_stop(s->audio, 0);         /* glide exit: 0x422e04(0) */
+            /* idle voice line on the idle_kind rising edge (state 1 / state
+             * 17; channel 17). Player 1 only. Penguin idle A picks A1/A2 and
+             * Fettalatte picks 1/2 by s->pl.idle_sound; penguin idle B is the
+             * yawn. */
+            if (s->pl.idle_kind && !s->idle_was) {
+                fa_snd_event ev = FA_SND_NONE;
+                if (!c1)
+                    ev = s->pl.idle_kind == 1
+                           ? (s->pl.idle_sound ? FA_SND_PENGUIN_IDLE_A2
+                                               : FA_SND_PENGUIN_IDLE_A1)
+                           : FA_SND_PENGUIN_IDLE_B;
+                else
+                    ev = s->pl.idle_sound ? FA_SND_MILCH_IDLE_2
+                                          : FA_SND_MILCH_IDLE_1;
+                if (ev != FA_SND_NONE) fa_audio_event(s->audio, ev);
+            }
         }
         if (thr_now && !s->thr_was && !shot0_reserved && s->ammo > 0)
             s->ammo--;
         if (s->coop && thr_now2 && !s->thr_was2 && s->ammo > 0) s->ammo--;
         s->swap_was  = swap_now;
+        s->idle_was  = s->pl.idle_kind;
         s->jump_was  = jump_now;
         s->thr_was   = thr_now;
         s->glide_was = glide_now;
@@ -1900,8 +1934,11 @@ static int dir_has_gdata(const char *dir)
     return 0;
 }
 
-/* Fill `out` with a GData path to try: --gdata, <exe dir>/GData, ./GData. */
-static void find_gdata(const char *arg, char *out, size_t cap)
+/* Fill `out` with a GData path to try: --gdata, the NRO directory/GData,
+ * and the conventional Switch SD-card locations. The NRO path comes from
+ * argv[0]; unlike a desktop CWD it is stable when hbmenu launches the app. */
+static void find_gdata(const char *arg, const char *exe_path,
+                       char *out, size_t cap)
 {
     if (arg && *arg) { snprintf(out, cap, "%s", arg); return; }
 
@@ -1914,6 +1951,35 @@ static void find_gdata(const char *arg, char *out, size_t cap)
         char cand[MAX_PATH + 16];
         snprintf(cand, sizeof cand, "%s\\GData", exe);
         if (dir_has_gdata(cand)) { snprintf(out, cap, "%s", cand); return; }
+    }
+#elif defined(__SWITCH__)
+    if (exe_path && exe_path[0]) {
+        char dir[700];
+        snprintf(dir, sizeof dir, "%s", exe_path);
+        char *slash = strrchr(dir, '/');
+        if (slash) {
+            *slash = '\0';
+            char cand[760];
+            snprintf(cand, sizeof cand, "%s/GData", dir);
+            if (dir_has_gdata(cand) && strlen(cand) + 1 <= cap) {
+                memcpy(out, cand, strlen(cand) + 1);
+                return;
+            }
+        }
+    }
+
+    /* These cover both a directory install and a convenient root-level
+     * layout used while copying a user's legally-owned GData tree. */
+    const char *cands[] = {
+        "sdmc:/switch/freshadventures/GData",
+        "sdmc:/switch/FreshAdventures/GData",
+        "sdmc:/GData"
+    };
+    for (size_t i = 0; i < sizeof cands / sizeof cands[0]; i++) {
+        if (dir_has_gdata(cands[i])) {
+            snprintf(out, cap, "%s", cands[i]);
+            return;
+        }
     }
 #endif
     snprintf(out, cap, "GData");
@@ -2013,7 +2079,12 @@ int main(int argc, char **argv)
            s.rng_seed_set ? " (--seed)" : " (clock)");
     fa_camera_init(&s.cam, FA_FB_W, FA_FB_H, FA_FB_W, FA_FB_H);
 
-    find_gdata(gdata_arg, s.gdata, sizeof s.gdata);
+#if defined(__SWITCH__)
+    /* stdio's sdmc: devoptab is not mounted by the game engine itself. */
+    fsdevMountSdmc();
+#endif
+    find_gdata(gdata_arg, (argc > 0) ? argv[0] : NULL,
+               s.gdata, sizeof s.gdata);
     char *gdata = s.gdata;
 
     /* RRR-46: the mixer needs the DIRECT GDATA LOADER (RRR-33). */

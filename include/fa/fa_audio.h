@@ -119,6 +119,20 @@ typedef enum fa_snd_event {
     FA_SND_W2_BOSS_LAND,   /* w2sf04.wav lane 9  - the yeti lands from a hop  */
     FA_SND_W2_BOSS_HURT,   /* w2sf05.wav lane 10 - the yeti takes a hit (fr69) */
 
+    /*
+     * Idle voice lines (player-anim-disasm-2.md section 1; state-1 handler
+     * 0x417BD5 / state-17 handler 0x418DA4). Each idle fidget starts a
+     * one-shot on the voice lane (channel 0x11). Penguin idle A picks A1/A2
+     * with rng()&1; penguin idle B is the yawn. Fettalatte's idle picks 1/2
+     * with rng()&1. .data strings 0x456BC0 / 0x456BE4 / 0x456C08 / 0x456B54 /
+     * 0x456B78 (Codex-confirmed against JR_FERRERO.exe).
+     */
+    FA_SND_PENGUIN_IDLE_A1,  /* voices/ita/pi0001.wav - penguin idle A (talk) */
+    FA_SND_PENGUIN_IDLE_A2,  /* voices/ita/pi0002.wav - penguin idle A (talk) */
+    FA_SND_PENGUIN_IDLE_B,   /* gaehnen.wav           - penguin idle B (yawn) */
+    FA_SND_MILCH_IDLE_1,     /* voices/ita/ms0001.wav - Fettalatte idle       */
+    FA_SND_MILCH_IDLE_2,     /* voices/ita/ms0002.wav - Fettalatte idle       */
+
     FA_SND__COUNT
 } fa_snd_event;
 

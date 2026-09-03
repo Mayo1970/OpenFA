@@ -92,6 +92,11 @@ void fa_player_set_ground(fa_player *p, fa_ground_fn fn, void *ctx)
     p->ground_ctx = ctx;
 }
 
+void fa_player_set_boss_arena(fa_player *p, int in_boss)
+{
+    p->in_boss = in_boss ? 1 : 0;
+}
+
 void fa_player_set_ladder(fa_player *p, fa_ladder_fn fn, void *ctx)
 {
     p->ladder_fn = fn;
@@ -199,8 +204,9 @@ static void finalize(fa_player *p, int jump_raw, int swit, int fire, int in_thro
     mix(p, (uint32_t)p->vy);
     mix(p, (uint32_t)((p->state << 8) | (p->gliding << 5) | (p->character << 4) |
                       (p->on_ground << 1) | (p->facing == FA_FACE_RIGHT)));
-    mix(p, (uint32_t)((p->swap_timer << 8) | (p->idle_kind << 4) |
-                      (p->on_ladder << 2) | (p->climb_moving << 1)));
+    mix(p, (uint32_t)((p->swap_timer << 8) | (p->idle_sound << 6) |
+                      (p->idle_kind << 4) | (p->on_ladder << 2) |
+                      (p->climb_moving << 1)));
     mix(p, (uint32_t)fa_player_live_snowballs(p));
 }
 
@@ -561,30 +567,54 @@ void fa_player_tick(fa_player *p, uint32_t in)
     else
         p->state = FA_PST_STAND;
 
-    /* idle (PL-101): only while standing still. idle_timer counts down; at 0
-     * roll rng%3 -> 0 nothing / 1 idle A / 2 idle B, then it plays once for
-     * idle_play ticks. The penguin has both A and B; Fettalatte only B. */
+    /*
+     * idle (PL-101 / player-anim-disasm-2 section 1): only while standing
+     * still. idle_timer counts down; at 0 roll rng%3 -> 0 nothing / 1 idle A
+     * / 2 idle B. Penguin idle A and Fettalatte's idle each start a voice
+     * line (state 1 / state 17, channel 17); the exe holds the clip until
+     * that line ends, so idle_play here is sized to the shipped .wav length
+     * at 60 Hz. Penguin idle B (the yawn) is NOT voice-gated - it just runs
+     * its 91..115 range once. In a boss arena (0x4DABD4 >= 4) the penguin is
+     * forced to idle B with no RNG draw and Fettalatte does not idle at all.
+     *
+     * The voice line is fired by the caller (fa_slice) on the idle_kind
+     * rising edge, reading idle_kind + idle_sound; audio is not a sim input.
+     */
     if (p->state == FA_PST_STAND && !in_throw) {
         if (p->idle_play > 0) {
-            if (--p->idle_play == 0) p->idle_kind = 0;
+            if (--p->idle_play == 0) { p->idle_kind = 0; p->idle_sound = 0; }
         } else if (p->idle_timer > 0) {
             p->idle_timer--;
         } else {
             p->idle_timer = t->idle_repeat;
-            unsigned r = prng(p) % 3u;
-            if (r == 0) {
-                p->idle_kind = 0;
-            } else if (p->character) {           /* Fettalatte: 137..159 */
-                p->idle_kind = 2; p->idle_play = 46;
-            } else if (r == 1) {                 /* penguin A: 65..69 */
-                p->idle_kind = 1; p->idle_play = 10;
-            } else {                             /* penguin B: 91..115 */
-                p->idle_kind = 2; p->idle_play = 50;
+            p->idle_sound = 0;
+            if (p->in_boss) {
+                /* boss arena: penguin -> forced yawn; Fettalatte -> nothing */
+                if (p->character) {
+                    p->idle_kind = 0;
+                } else {
+                    p->idle_kind = 2; p->idle_play = 50;   /* 91..115 yawn */
+                }
+            } else {
+                unsigned r = prng(p) % 3u;
+                if (r == 0) {
+                    p->idle_kind = 0;
+                } else if (p->character) {           /* Fettalatte: 137..159 */
+                    p->idle_sound = (int)(prng(p) & 1u);
+                    p->idle_kind = 2;
+                    p->idle_play = p->idle_sound ? 288 : 311;  /* ms0002/ms0001 */
+                } else if (r == 1) {                 /* penguin idle A: 65..69 */
+                    p->idle_sound = (int)(prng(p) & 1u);
+                    p->idle_kind = 1;
+                    p->idle_play = p->idle_sound ? 437 : 325;  /* pi0002/pi0001 */
+                } else {                             /* penguin idle B: 91..115 */
+                    p->idle_kind = 2; p->idle_play = 50;
+                }
             }
         }
     } else {
         p->idle_timer = t->idle_delay;
-        p->idle_kind = p->idle_play = 0;
+        p->idle_kind = p->idle_play = p->idle_sound = 0;
     }
 
     finalize(p, jump_raw, swit, fire, in_throw);

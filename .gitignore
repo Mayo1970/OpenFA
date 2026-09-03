@@ -8,6 +8,15 @@ dist/
 # never track game assets (RRR-100)
 GData/
 
+# Switch homebrew build artifacts (keep the source tracked)
+switch/build/
+*.nro
+*.nso
+*.nacp
+*.elf
+*.lst
+*.map
+
 # Smoking tests
 scratchpad/
 tests/
