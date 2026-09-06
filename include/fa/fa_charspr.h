@@ -1,7 +1,7 @@
 /*
  * fa_charspr.h - character sprite sheet + animation playback
  *
- * Draws the playable kids (PINGUIN.W01, MILCHSCHNITTE.W01) and, later, any
+ * Draws the playable characters (PINGUIN.W01, MILCHSCHNITTE.W01) and, later, any
  * hand-animated actor that is NOT an AOM script object. AOM objects go
  * through fa_aom.h instead.
  *
@@ -9,7 +9,7 @@
  *   - There is NO clip-id table. The player state machine (dispatch table at
  *     0x41A128) writes literal W01 frame numbers - {current, loop_start,
  *     inclusive_end, repeat} - into a 0x64-byte animation record per
- *     character (Penguin 0x4E0F30, Milch 0x4E0FA8). fa_charspr reproduces
+ *     character (Pinguì 0x4E0F30, Milchschnitte 0x4E0FA8). fa_charspr reproduces
  *     that as a per-pose clip the caller sets with the disassembled constants
  *     (fa_cs_anim_bind_frames). repeat: loop (-1 in the exe) vs hold the last
  *     frame (0 in the exe).
@@ -78,9 +78,9 @@ typedef enum {
     FA_CS_IDLE_A,       /* short idle fidget */
     FA_CS_IDLE_B,       /* long idle animation */
     FA_CS_CLIMB,        /* on a ladder; freeze the frame when not moving */
-    FA_CS_PUSH,         /* Fettalatte shoving a heavy object */
-    FA_CS_SWAP,         /* the turn-to-camera + wave while the kid swaps out */
-    FA_CS_SWAP_END,     /* Fettalatte's turn-back, played at the end of the swap */
+    FA_CS_PUSH,         /* Milchschnitte shoving a heavy object */
+    FA_CS_SWAP,         /* the turn-to-camera + wave while the character swaps out */
+    FA_CS_SWAP_END,     /* Milchschnitte's turn-back, played at the end of the swap */
     FA_CS_POSE_COUNT
 } fa_cs_pose;
 

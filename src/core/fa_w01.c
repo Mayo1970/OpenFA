@@ -2,6 +2,7 @@
  * fa_w01.c - .W01 container + frame decode. See fa_w01.h.
  */
 #include "fa/fa_w01.h"
+#include "fa/fa_fs.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -136,7 +137,7 @@ int fa_w01_open(fa_w01 *o, const void *data, size_t len, int copy)
 
 int fa_w01_open_file(fa_w01 *o, const char *path)
 {
-    FILE *f = fopen(path, "rb");
+    FILE *f = fa_fs_fopen(path, "rb");
     if (!f) return -1;
     fseek(f, 0, SEEK_END);
     long n = ftell(f);

@@ -211,7 +211,7 @@ void fa_entity_set_terrain(fa_entity_store *s, fa_entity_solid_fn fn, void *ctx)
 int fa_entity_solid_at(const fa_entity_store *s, int px, int py);
 
 /*
- * Fettalatte's shove. Find the pushable block the probe point
+ * Milchschnitte's shove. Find the pushable block the probe point
  * (px + facing*reach, feet_y - 16) lands in and move it up to `step` px in
  * `facing` (+1 right / -1 left), stopping it at solid terrain or another
  * block. Returns the pixels actually moved (0 if nothing pushable or fully
@@ -221,7 +221,7 @@ int fa_entity_shove(fa_entity_store *s, int px, int feet_y, int facing,
                     int reach, int step);
 
 /* 1 if a pushable block sits at world pixel (px, py) - bind through
- * fa_player_set_pushable so Fettalatte enters FA_PST_PUSH. */
+ * fa_player_set_pushable so Milchschnitte enters FA_PST_PUSH. */
 int fa_entity_pushable_at(const fa_entity_store *s, int px, int py);
 
 /*

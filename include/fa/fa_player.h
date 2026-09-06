@@ -15,12 +15,12 @@
  *       player is still rising, gravity is softened (jump_hold_gravity) for up
  *       to jump_hold_ticks - a hold-higher variable jump that still arcs, so
  *       there is no mid-air float. Release or the apex ends the assist. No
- *       double jump. jump_vel is per-character: character 0 (penguin) jumps
- *       higher than character 1 (Fettalatte). An early read of the original
+ *       double jump. jump_vel is per-character: character 0 (Pinguì) jumps
+ *       higher than character 1 (Milchschnitte). An early read of the original
  *       as a per-tick impulse re-apply pinned velocity and floated, so it was
  *       retuned to the softer-gravity form.
- *     - GLIDE (penguin only): once past the jump apex (vy > 0), holding JUMP
- *       plus a direction caps the descent at glide_max_vy - the penguin sinks
+ *     - GLIDE (Pinguì only): once past the jump apex (vy > 0), holding JUMP
+ *       plus a direction caps the descent at glide_max_vy - Pinguì sinks
  *       slowly and drifts far. No height gain. Releasing JUMP or the
  *       direction, or landing, ends it. Character 1 cannot glide.
  *   GRAVITY = 0.6 px/tick^2, TERMINAL fall = 20.0 px/tick: the engine
@@ -63,7 +63,7 @@ enum {
     FA_PI_JUMP   = 1u << 4,   /* A */
     FA_PI_FIRE   = 1u << 5,   /* S - throw a snowball */
     FA_PI_ACTION = 1u << 6,   /* F */
-    FA_PI_SWITCH = 1u << 7    /* D - swap the active kid (tentative bind) */
+    FA_PI_SWITCH = 1u << 7    /* D - swap the active character (tentative bind) */
 };
 
 typedef enum {
@@ -73,7 +73,7 @@ typedef enum {
     FA_PST_JUMP,      /* moving up */
     FA_PST_FALL,      /* moving down / off a ledge */
     FA_PST_CLIMB,     /* on a ladder                            */
-    FA_PST_PUSH,      /* Fettalatte shoving an object           */
+    FA_PST_PUSH,      /* Milchschnitte shoving an object        */
     FA_PST_SWAP       /* character swap in progress             */
 } fa_player_state;
 
@@ -81,8 +81,8 @@ typedef enum { FA_FACE_LEFT = -1, FA_FACE_RIGHT = 1 } fa_facing;
 
 typedef struct fa_player_tuning {
     int32_t gravity;        /* + added to vy each tick (0.6)                  */
-    int32_t jump_vel;       /* - vy impulse on jump, character 0 (the penguin)*/
-    int32_t jump_vel_c1;    /* - vy impulse on jump, character 1 (Fettalatte) */
+    int32_t jump_vel;       /* - vy impulse on jump, character 0 (Pinguì)     */
+    int32_t jump_vel_c1;    /* - vy impulse on jump, character 1 (Milchschnitte) */
     int32_t jump_hold_gravity;/* softer gravity while JUMP is held and rising */
     int      jump_hold_ticks;/* max ticks the softer gravity lasts            */
     int32_t run_speed;      /* vx SET to +/-this on the ground (5.0)          */
@@ -91,23 +91,23 @@ typedef struct fa_player_tuning {
     int32_t air_max;        /* air horizontal clamp (5.0)                     */
     int32_t crouch_max;     /* horizontal cap while crouching                 */
     int32_t floor_y;        /* flat-floor Y when no ground probe is set       */
-    int32_t glide_max_vy;   /* descent cap while the penguin glides (slow)    */
+    int32_t glide_max_vy;   /* descent cap while Pinguì glides (slow)         */
 
     int32_t climb_speed;    /* px/tick on a ladder, any direction (3)         */
     int32_t climb_jump_vx;  /* vx when JUMP leaves a ladder with a dir held (5)*/
-    /* NOT from the exe: the port's dismount assist. px/tick the kid pulls
+    /* NOT from the exe: the port's dismount assist. px/tick the character pulls
      * itself onto the deck a spent vine ended at. See fa_player.c. */
     int32_t climb_dismount_speed;
     int      idle_delay;    /* stand ticks before the first idle roll (300)   */
     int      idle_repeat;   /* stand ticks between later idle rolls (240)     */
     /*
-     * The swap is locked for the outgoing kid's voice line: penguin
-     * -> Fettalatte on pi0020.wav (~94 ticks), Fettalatte -> penguin on
-     * ms0013.wav (~105 ticks). Fettalatte then plays a turn-back
+     * The swap is locked for the outgoing character's voice line: Pinguì
+     * -> Milchschnitte on pi0020.wav (~94 ticks), Milchschnitte -> Pinguì on
+     * ms0013.wav (~105 ticks). Milchschnitte then plays a turn-back
      * (MILCHSCHNITTE.W01 150..159) for swap_end_c1 more ticks before the
-     * character actually changes; the penguin has no turn-back.
+     * character actually changes; Pinguì has no turn-back.
      */
-    int      swap_ticks;    /* lock length when character 0 (penguin) leaves  */
+    int      swap_ticks;    /* lock length when character 0 (Pinguì) leaves   */
     int      swap_ticks_c1; /* lock length when character 1 leaves (voice + end)*/
     int      swap_end_c1;   /* trailing ticks of the c1 swap that are the turn-back */
     int32_t  push_obj_vx;   /* vx pushed onto a heavy object (7.0)            */
@@ -119,8 +119,8 @@ typedef struct fa_player_tuning {
      * The exe plays PINGUIN.W01 233..260 (ball spawns on frame 255)
      * and MILCHSCHNITTE.W01 273..296 (spawn 291) at 2 ticks/frame.
      */
-    int      throw_ticks;       /* total throw lock, character 0 (penguin)   */
-    int      throw_ticks_c1;    /* total throw lock, character 1 (Fettalatte)*/
+    int      throw_ticks;       /* total throw lock, character 0 (Pinguì)    */
+    int      throw_ticks_c1;    /* total throw lock, character 1 (Milchschnitte) */
     int      throw_release;     /* ticks from start to spawn, character 0    */
     int      throw_release_c1;  /* ticks from start to spawn, character 1    */
     int32_t  snow_vx;           /* forward throw: + speed, signed by facing  */
@@ -158,8 +158,8 @@ typedef struct fa_player {
     fa_player_state state;
     fa_facing facing;
     int      on_ground;
-    int      character;      /* 0 or 1 - the active kid */
-    int      gliding;        /* 1 while the penguin glide is active this tick */
+    int      character;      /* 0 or 1 - the active character */
+    int      gliding;        /* 1 while the Pinguì glide is active this tick */
 
     int      jump_hold;      /* ticks left in the hold-higher jump window */
     int      jump_held_prev;
@@ -188,7 +188,7 @@ typedef struct fa_player {
     /* climb */
     int      on_ladder;      /* 1 while FA_PST_CLIMB and a ladder is present */
     int      climb_moving;   /* 1 if the player moved on the ladder this tick*/
-    /* dismount assist: 1 while the kid glides onto the deck a spent vine
+    /* dismount assist: 1 while the character glides onto the deck a spent vine
      * ended at. `dismount_y` is the target feet Y (16.16). JUMP cancels it. */
     int      dismount;
     int32_t  dismount_y;
@@ -205,7 +205,7 @@ typedef struct fa_player {
     int    (*ladder_fn)(int px, int py, void *ctx);
     void   *ladder_ctx;
     /* pushable probe: 1 if a heavy object sits at world pixel (px,py).
-     * NULL = nothing pushable, so Fettalatte never enters FA_PST_PUSH. */
+     * NULL = nothing pushable, so Milchschnitte never enters FA_PST_PUSH. */
     int    (*pushable_fn)(int px, int py, void *ctx);
     void   *pushable_ctx;
 
@@ -227,7 +227,7 @@ void fa_player_init(fa_player *p, int spawn_x, int spawn_y);
 
 /* Mark the player as inside (1) or outside (0) a boss arena. The exe's idle
  * roll (0x417C95 / 0x418EA3) reads world index 0x4DABD4: >= 4 (a boss stage)
- * forces the penguin to idle B and suppresses Fettalatte's idle entirely. */
+ * forces Pinguì to idle B and suppresses Milchschnitte's idle entirely. */
 void fa_player_set_boss_arena(fa_player *p, int in_boss);
 
 void fa_player_set_ground(fa_player *p, fa_ground_fn fn, void *ctx);

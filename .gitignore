@@ -26,3 +26,11 @@ build-and-test.sh
 tut.ini
 
 dist-README.txt
+
+# Linux build artifacts
+AppDir/
+dist-linux/
+dist-linux.bak/
+flatpak/
+*.AppImage
+appimagetool-x86_64.AppImage

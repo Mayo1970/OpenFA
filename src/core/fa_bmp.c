@@ -3,6 +3,7 @@
  */
 #include "fa/fa_bmp.h"
 #include "fa/fa_surface.h"
+#include "fa/fa_fs.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,7 +63,7 @@ int fa_bmp_load_mem(struct fa_surface *out, const void *data, size_t len)
 
 int fa_bmp_load_file(struct fa_surface *out, const char *path)
 {
-    FILE *f = fopen(path, "rb");
+    FILE *f = fa_fs_fopen(path, "rb");
     if (!f) return -1;
     fseek(f, 0, SEEK_END);
     long n = ftell(f);

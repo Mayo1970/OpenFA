@@ -7,6 +7,7 @@
 #include "fa/fa_bmp.h"
 #include "fa/fa_w01.h"
 #include "fa/fa_vfs.h"
+#include "fa/fa_fs.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -175,7 +176,7 @@ static void load_world_table(fa_hiscore *h, fa_hs_file *hs, int w1)
         char p[700];
         snprintf(p, sizeof p, "%s/Save/%sighscore%d.dat",
                  h->gdata, lc ? "h" : "H", w1);
-        FILE *f = fopen(p, "rb");
+        FILE *f = fa_fs_fopen(p, "rb");
         if (!f) continue;
         size_t n = fread(buf, 1, sizeof buf, f);
         fclose(f);

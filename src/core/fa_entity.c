@@ -7,6 +7,7 @@
 #include "fa/fa_w01.h"
 #include "fa/fa_surface.h"
 #include "fa/fa_render.h"
+#include "fa/fa_fs.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -100,7 +101,10 @@ static int list_dir(const char *dir, dir_cb fn, void *user)
     FindClose(h);
     return 0;
 #else
-    DIR *d = opendir(dir);
+    char real[FA_FS_PATH_MAX];
+    if (fa_fs_resolve(dir, real, sizeof real) != 0)
+        return -1;
+    DIR *d = opendir(real);
     if (!d) return -1;
     struct dirent *ent;
     while ((ent = readdir(d)) != NULL)
@@ -925,7 +929,7 @@ int fa_entity_solid_at(const fa_entity_store *s, int px, int py)
             if (py >= y0 && py <= y1) return 1;      /* inset box, hard solid */
         } else {
             /* lift / raft: a THIN one-way strip just below the per-sprite
-             * deck line - fa_collide grounds the kid when his feet sit at
+             * deck line - fa_collide grounds the character when its feet sit at
              * the deck and fn(feet) reads NONE while fn(feet+1) reads
              * ONEWAY (fa_collide.c floor_blocks). Passable from below so a
              * jump reaches the top. The fa_slice pre-tick snap keeps the

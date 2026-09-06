@@ -2,6 +2,7 @@
  * fa_wav.c - PCM RIFF/WAVE reader. See fa_wav.h.
  */
 #include "fa/fa_wav.h"
+#include "fa/fa_fs.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,7 +84,7 @@ int fa_wav_open_file(fa_wav *w, const char *path)
 {
     if (w) memset(w, 0, sizeof *w);
     if (!path) return -1;
-    FILE *f = fopen(path, "rb");
+    FILE *f = fa_fs_fopen(path, "rb");
     if (!f) return -1;
     if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return -1; }
     long sz = ftell(f);

@@ -86,7 +86,7 @@ typedef struct fa_beh_hooks {
     /* Play a FA_BEH_SFX_* cue for the given enemy ObjNr (the throw / dive
      * sound differs per type - see fa_slice beh_sfx). */
     void (*sfx)(int ev, int obj_nr, void *user);
-    /* Play a Kinder Paradiso voice line, streamed on lane 17 (0x415550).
+    /* Play a Paradiso voice line, streamed on lane 17 (0x415550).
      * `rel_wav` is a GData-relative path. In a NORMAL level it is the one
      * world line PA00NN.wav; in a TUTORIAL level (WeltNt) it is a PAT00NN.wav
      * checkpoint line picked by the placement's rec[+0x2A] (0x415B70).
@@ -95,7 +95,7 @@ typedef struct fa_beh_hooks {
     /* Non-zero while the last `voice` line is still playing (0x4231E5) - the
      * Paradiso loops its mouth animation until this goes 0. Optional. */
     int  (*voice_busy)(void *user);
-    /* The tutorial-end Kinder Paradiso (the placement with rec[+0x2A] == 7,
+    /* The tutorial-end Paradiso (the placement with rec[+0x2A] == 7,
      * always near the level exit) finished its line (pat0020). The exe then
      * writes tut.ini[world] = 1 and requests scene 20 (0x4159BD/0x4159C5),
      * which reloads the same world as its normal level. The host marks the
@@ -125,12 +125,12 @@ typedef struct fa_beh fa_beh;
 fa_beh *fa_beh_create(struct fa_entity_store *store, const fa_beh_hooks *hooks);
 void    fa_beh_free(fa_beh *b);
 
-/* The world index (1..4), for the level-specific Kinder Paradiso cue
+/* The world index (1..4), for the level-specific Paradiso cue
  * (ds:0x4DABD4 in the exe: world 1 PA0011, 2 PA0014, 3 PA0013, 4 PA0012). */
 void    fa_beh_set_world(fa_beh *b, int world);
 
-/* The active character (0 penguin / 1 Milchschnitte, ds:0x4E1020). Two
- * tutorial Kinder Paradiso checkpoints (rec[+0x2A] 6 and 8) speak a
+/* The active character (0 Pinguì / 1 Milchschnitte, ds:0x4E1020). Two
+ * tutorial Paradiso checkpoints (rec[+0x2A] 6 and 8) speak a
  * per-character line. Call each tick before fa_entity_tick; default 0. */
 void    fa_beh_set_character(fa_beh *b, int character);
 
@@ -177,7 +177,7 @@ int fa_beh_damage_player(const fa_beh *b, int player);
 int fa_beh_knockback_player(const fa_beh *b, int player);
 
 /*
- * The Fettalatte shove. On the push animation's frame-176 event the
+ * The Milchschnitte shove. On the push animation's frame-176 event the
  * host calls this with the kind-5 probe point (body_x +/- 32, body_y - 100)
  * and the facing (+1 right / -1 left). If an active pushable block (ObjNr
  * 76/78/86/87) contains that point, its float vx is set to +/-7.0 for one
@@ -227,7 +227,7 @@ int fa_beh_boss_hp(const fa_beh *b);          /* -1 if no boss in the level */
  * snowball (collect_dirtyballs, ObjNr 60) hurts it, and only while it is idle
  * or kicking. Same 10 hits -> +10000 -> KO and the same 7th-piece (ObjNr 59)
  * -> CLASSIFICA chain as the gorilla. Call fa_beh_set_ammo_dirty each tick.
- *   - KICK sends a floor ice block (ObjNr 265) sliding left at the kid.
+ *   - KICK sends a floor ice block (ObjNr 265) sliding left at the character.
  *   - HOP (and every hit-recoil jump) drops a pattern of ceiling icicles
  *     (ObjNr 79).
  *   - the ice platform under it (ObjNr 80) stops animating on the KO.

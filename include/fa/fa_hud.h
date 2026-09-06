@@ -9,7 +9,7 @@
  *   Interface/Ingame/SchussD.w01         the same gauge, "dirty" snowballs
  *   Interface/Ingame/Item1..6.w01        the 6 recipe pieces, frame 0 dim /
  *                                        frame 1 lit
- *   Interface/Ingame/Actors.w01          the active-kid portrait, 2 frames
+ *   Interface/Ingame/Actors.w01          the active-character portrait, 2 frames
  *   Interface/Ingame/Schrift.w01         a 10-frame digit sheet (0..9) for
  *                                        the score
  * Every sprite blits at its own .W01 table-A origin, so the layout comes from
@@ -46,7 +46,7 @@ void fa_hud_free(fa_hud *h);
  *   ammo       0..10 snowballs left (0x45ED34); <= 0 hides the gauge
  *   dirty      non-zero selects the SchussD art (collect_dirtyballs, ObjNr 60)
  *   items      6 flags: items[i] != 0 shows recipe piece i+1 as collected
- *   character  0 penguin / 1 Milchschnitte - selects the Actors frame
+ *   character  0 Pinguì / 1 Milchschnitte - selects the Actors frame
  *   boss_hp    >= 0 in a boss arena (exe flag 0x45ECBC). The boss bar
  *              (Boss/BossInterface + Boss/Energy frame boss_hp + Boss/Bosspics
  *              frame boss_pic) REPLACES the 6 recipe-piece icons. -1 = the

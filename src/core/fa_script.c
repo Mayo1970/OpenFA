@@ -4,6 +4,7 @@
  * interpreter).
  */
 #include "fa/fa_script.h"
+#include "fa/fa_fs.h"
 
 #include <limits.h>
 #include <setjmp.h>
@@ -663,7 +664,7 @@ int fa_script_do_file(fa_script *s, const char *path)
     int rc;
 
     if (!s || !path) return -1;
-    f = fopen(path, "rb");
+    f = fa_fs_fopen(path, "rb");
     if (!f) {
         snprintf(s->err, sizeof(s->err), "%s: cannot open", path);
         return -1;

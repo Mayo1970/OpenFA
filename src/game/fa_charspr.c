@@ -3,6 +3,7 @@
  */
 #include "fa/fa_charspr.h"
 #include "fa/fa_surface.h"
+#include "fa/fa_fs.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -172,7 +173,7 @@ static int open_case_tolerant(fa_w01 *w, const char *path)
 /* Read a whole file into a malloc'd buffer. Returns bytes, or -1. */
 static long slurp(const char *path, char **out)
 {
-    FILE *f = fopen(path, "rb");
+    FILE *f = fa_fs_fopen(path, "rb");
     if (!f) return -1;
     if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return -1; }
     long sz = ftell(f);

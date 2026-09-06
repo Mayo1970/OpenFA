@@ -17,22 +17,21 @@
  *   fa_slice --frames N      run N frames headless and print stats
  *   fa_slice --seed N        pin the enemy RNG (default: wall clock)
  *
- * Menu: this is the screen the real game opens on.
- *       Mouse, keyboard arrows, and a controller D-pad select a world;
+ * Menu: mouse, keyboard arrows, or a controller D-pad select a world;
  *       Enter / controller A confirms it.
- * Level (--world N): arrows walk, A jump, S throw, D switch kid. Esc quits.
- *   ENTER / controller START enables local co-op: the input that joins takes
- *   Milchschnitte, while the other input takes Penguin. With one controller,
- *   ENTER therefore makes the keyboard Milchschnitte and the controller
- *   Penguin; with two controllers, START assigns the joining pad to
- *   Milchschnitte and the other pad to Penguin. With keyboard-only co-op,
- *   the two layouts are swapped accordingly. T teleports Milchschnitte near
- *   Penguin; on her controller, LB performs the same teleport.
- *   P  toggle free-move (dev): fly through walls to reach the pickups; hold
- *      A while flying for a fast dash. Pickups and the boss gate still work.
+ * Level (--world N): arrows walk, A jump, S throw, D switch character.
+ *   Esc / controller SELECT returns to the main menu.
+ *   ENTER / controller START enables local co-op: the joining input takes
+ *   Milchschnitte, the other takes Pinguì (keyboard layouts swap to match).
+ *   T (or LB on Milchschnitte's pad) teleports her near Pinguì.
+ *   P  toggle free-move (dev): no-clip fly, hold A to dash.
  *   I  skip straight to this world's boss arena (dev).
  *
- * GData lookup order: --gdata DIR, then <exe dir>/GData, then ./GData.
+ * GData lookup order: --gdata DIR, then <exe dir>/GData, then (POSIX)
+ * ~/.local/share/OpenFA/GData (this is what a Flatpak install uses - see
+ * flatpak/io.github.Mayo1970.OpenFA.yml), then ./GData.
+ * If none is found the program shows an error and exits; only --frames
+ * (automation) and the --tone / --grid test pattern may run without GData.
  */
 #include "fa/fa_app.h"
 #include "fa/fa_platform.h"
@@ -65,6 +64,12 @@
 #  include <windows.h>
 #elif defined(__SWITCH__)
 #  include <switch.h>
+#else
+#  include <unistd.h>   /* readlink - exe-dir GData probe on POSIX */
+#endif
+
+#if defined(FA_HAVE_SDL2)
+#  include <SDL.h>       /* SDL_ShowSimpleMessageBox for the no-GData error */
 #endif
 
 typedef struct {
@@ -105,21 +110,18 @@ typedef struct {
     int       death_player;       /* player that triggered the shared KO       */
     int       freemove;         /* P toggle: fly through the level, no clip  */
 
-    /* the retail exe seeds the one rand() stream from the wall clock at
-     * start-up (0x42AE27). The slice seeds the enemy RNG from time() unless
-     * --seed N pins it. */
+    /* enemy RNG seed: time() like the retail exe (0x42AE27), or --seed N. */
     uint32_t  rng_seed;
     int       rng_seed_set;
 
-    /* health 0 -> the run ends. fa_death times the KO hold (240) + fade (16);
-     * the level keeps running underneath. On DONE the level is torn down and
-     * the CLASSIFICA / high-score screen comes up, then the world-select
-     * menu. No in-place restart, no lives. */
+    /* health 0 ends the run. fa_death times the KO hold + fade with the level
+     * still running; on DONE the level is torn down for the CLASSIFICA screen
+     * then the menu. No restart, no lives. */
     fa_death  death;
     /* solid probe ctx: terrain + the lift/block layer */
     struct { const fa_map *map; const fa_tileset *ts; fa_entity_store *ents; } coll;
 
-    fa_cs_sheet kid_sheet[2];    /* 0 = penguin, 1 = Milchschnitte */
+    fa_cs_sheet kid_sheet[2];    /* 0 = Pinguì, 1 = Milchschnitte */
     fa_cs_anim  kid_anim[2];
     int         have_kids;
     int         kid_was_crouch;  /* to trigger the stand-up animation */
@@ -137,7 +139,7 @@ typedef struct {
     int       idle_was;     /* previous tick's s->pl.idle_kind (voice edge)*/
     int       jump_was;     /* previous tick's FA_PST_JUMP flag            */
     int       thr_was;      /* previous tick's throw_anim > 0              */
-    int       glide_was;    /* previous tick's penguin glide flag         */
+    int       glide_was;    /* previous tick's Pinguì glide flag          */
 
     uint32_t  cr_act_was;   /* prev tick's action mask (credits skip)      */
     uint32_t  menu_nav_seen;/* suppress a held edge across multi-tick frames */
@@ -187,7 +189,7 @@ static void slice_merge_pad_movement(const fa_frame_input *fi, uint32_t *m)
     if ((b & (1u << FA_PAD_DPAD_DOWN)) || fi->pad_ly > 0.35f)
         *m |= 1u << FA_ACT_DOWN;
 
-    /* Xbox-reference face layout: A jumps, B throws, Y swaps the active kid.
+    /* Xbox-reference face layout: A jumps, B throws, Y swaps the active character.
      * SDL_GameController supplies these as logical buttons on other layouts. */
     if (b & (1u << FA_PAD_A)) *m |= 1u << FA_ACT_JUMP;
     if (b & (1u << FA_PAD_B)) *m |= 1u << FA_ACT_FIRE;
@@ -265,7 +267,7 @@ static int slice_join_coop(slice *s, const fa_frame_input *fi)
     s->keyboard_roles_swapped = 0;
     if (join_pad >= 0) {
         /* When two pads are present, the pad that joined gets Milchschnitte
-         * and the other pad remains Penguin's controller. */
+         * and the other pad remains Pinguì's controller. */
         for (int i = 0; i < FA_APP_MAX_PADS; i++) {
             if (i != join_pad && fi->pads[i].connected) {
                 s->p1_controller = i;
@@ -274,8 +276,8 @@ static int slice_join_coop(slice *s, const fa_frame_input *fi)
         }
     } else {
         /* ENTER joins from the keyboard, so the keyboard becomes
-         * Milchschnitte's input. If a pad is attached, it remains Penguin's
-         * input; otherwise the alternate keyboard layout becomes Penguin's
+         * Milchschnitte's input. If a pad is attached, it remains Pinguì's
+         * input; otherwise the alternate keyboard layout becomes Pinguì's
          * input. */
         s->p2_controller = -1;
         s->keyboard_roles_swapped = 1;
@@ -287,13 +289,13 @@ static int slice_join_coop(slice *s, const fa_frame_input *fi)
         }
     }
     slice_teleport_milch(s);
-    const char *penguin = s->p1_controller >= 0 ? "controller"
+    const char *pingui = s->p1_controller >= 0 ? "controller"
         : (s->keyboard_roles_swapped ? "I/J/K/L + U/O" : "keyboard");
     const char *milch = s->p2_controller >= 0 ? "controller"
         : (s->keyboard_roles_swapped ? "keyboard (T teleport)"
                                      : "I/J/K/L + U/O (T teleport)");
-    printf("local co-op enabled: Penguin=%s, Milchschnitte=%s\n",
-           penguin, milch);
+    printf("local co-op enabled: Pinguì=%s, Milchschnitte=%s\n",
+           pingui, milch);
     return 1;
 }
 
@@ -318,9 +320,8 @@ static void slice_teleport_milch(slice *s)
     s->pl2.idle_timer = s->pl2.t.idle_delay;
 }
 
-/* decode one .W01 frame and blit it colour-keyed, centred on (cx, cy) in the
- * destination surface. Returns 1 on success, 0 if there is no sheet / the
- * frame is out of range / decode failed. */
+/* Decode one .W01 frame and blit it colour-keyed, centred on (cx, cy).
+ * Returns 1, or 0 on no sheet / bad frame / decode failure. */
 static int blit_w01_centered(const fa_surface *dst, const fa_w01 *w,
                              int frame, int cx, int cy)
 {
@@ -361,9 +362,8 @@ static int slice_ladder(int px, int py, void *ctx)
     return fa_map_ladder_at((const fa_map *)ctx, px, py);
 }
 
-/* terrain collision class at a world pixel (0 none / 1 solid / 2
- * one-way). Per-pixel via the decoded atlas so slopes follow their diagonal
- * (fa_render_solid_px); falls back to the coarse tile query without GData. */
+/* terrain collision class at a world pixel (0 none / 1 solid / 2 one-way),
+ * per-pixel via the decoded atlas so slopes follow their diagonal. */
 typedef struct { const fa_map *map; const fa_tileset *ts;
                  fa_entity_store *ents; } coll_ctx;
 
@@ -373,8 +373,8 @@ static int slice_terrain(int px, int py, void *ctx)
     return fa_render_solid_px(c->map, c->ts, px, py);
 }
 
-/* terrain OR a lift top / a pushable block, so the player stands on
- * rafts (fall pose fixed) and cannot walk through blocks. */
+/* terrain OR a lift top / pushable block: the player stands on rafts and
+ * cannot walk through blocks. */
 static int slice_solid(int px, int py, void *ctx)
 {
     const coll_ctx *c = ctx;
@@ -386,29 +386,17 @@ static int slice_solid(int px, int py, void *ctx)
     return r;
 }
 
-/* a pushable block at (px,py) -> Fettalatte enters PUSH. */
+/* a pushable block at (px,py) -> Milchschnitte enters PUSH. */
 static int slice_pushable(int px, int py, void *ctx)
 {
     return fa_entity_pushable_at((const fa_entity_store *)ctx, px, py);
 }
 
 /*
- * a HAZARD tile at world pixel (px,py). The exe (fcn.0041A290, run
- * from the player state-machine tail at 0x419DA1 every frame) queries plane 2
- * at the player origin: a non-empty cell whose attr byte has bit 0x80 set is
- * a hazard - spikes / lava / a bottom-of-pit pool. On it: play the character
- * hit sound (pi0005 / ms0007), and if not in i-frames deal 20 damage + 120
- * i-frames; either way bounce vy = -20.0 (0x431A20 with 0xFFFEC000). Shipped
- * maps: Welt1 a SOLID band at y=2336 (the floor of the water gaps between
- * platforms), Welt2 SOLID spike tiles, Welt3/4 NON-solid lava pools. `attr &
- * 0x80` is the hazard flag.
- *
- * The exe samples exactly `trunc(feet)`. `fa_collide` rests a standing kid
- * ~1 px ABOVE the solid pixel it lands on, so on the Welt1 SOLID hazard band
- * the feet can read as the empty row just above - check the feet cell AND the
- * cell a few px below (the tile the kid is standing ON), so wading in the
- * water hurts while the grass platform above (no 0x80 tile)
- * never does.
+ * a HAZARD tile at world pixel (px,py): a non-empty plane-2 cell with attr bit
+ * 0x80 (spikes / lava / pit pool), matching the exe check at fcn.0041A290.
+ * We sample the feet cell AND a few px below, because fa_collide rests the character
+ * ~1 px above the pixel it lands on and would otherwise miss the Welt1 band.
  */
 static int slice_hazard(const fa_map *m, int px, int py)
 {
@@ -436,18 +424,11 @@ static void beh_score(int add, void *ctx)
 }
 
 /*
- * one collected DetailGroup-1 pickup. The effect is per ObjNr,
- * traced from the handlers the exe installs at 0x411c18..0x411d46:
- *   48/49/50 collect_paradiso/pinguin/milchschnitte  0x40edb0  score += 100
- *   51       collect_energy                          0x40eeb0  health += 40 (cap 100)
- *   52       collect_snowballs                       0x40efe0  ammo = 10, normal
- *   53..58   collect_i1..i6                          0x40f110+ score += 1000, set flag
- *   59       collect_i7                              0x40f770  score += 10000
- *   60       collect_dirtyballs                      0x40fa00  ammo = 10, "dirty"
- * (the "+N" POINTS.W01 popup the exe also spawns is cosmetic - not ported.)
- * The energy + both ammo pickups (51/52/60) respawn 1200 ticks (20 s) after
- * they are taken (exe rec[+0x74] = 0x4B0); the score / recipe ones are gone
- * for good. The callback returns that respawn delay (0 = permanent).
+ * one collected DetailGroup-1 pickup, effect per ObjNr (exe 0x411c18..0x411d46):
+ *   48/49/50 score +=100   51 health +=40   52 ammo=10   53..58 score +=1000+flag
+ *   59 score +=10000   60 ammo=10 "dirty"
+ * Energy and both ammo pickups (51/52/60) respawn after 1200 ticks; the rest are
+ * permanent. Returns the respawn delay (0 = permanent).
  */
 static int beh_pickup(int obj_nr, int detail_group, void *ctx)
 {
@@ -531,10 +512,8 @@ static void beh_sfx(int ev, int obj, void *ctx)
 }
 
 /*
- * A streamed voice line. The exe splits these across two lanes: the Kinder
- * Paradiso mascot streams on channel 0x11 = lane 17 (0x415550), the world
- * bosses on channel 0x12 = lane 18 (0x40E350 etc). Route by the file stem -
- * gb/yb/rb/ob NNNN are boss lines, pa/pat NNNN are the mascot.
+ * A streamed voice line. Route by file stem: gb/yb/rb/ob NNNN are boss lines
+ * (lane 18), pa/pat NNNN are the Paradiso mascot (lane 17).
  */
 static void beh_voice(const char *rel_wav, void *ctx)
 {
@@ -559,12 +538,9 @@ static int beh_voice_busy(void *ctx)
 }
 
 /*
- * the tutorial-end Kinder Paradiso (rec[+0x2A] == 7) finished
- * its pat0020 line. The exe writes tut.ini[world] = 1 (0x4159BD) and requests
- * scene 20 (0x4159C5), which reloads the world as its normal level
- * (0x4126F3: 0x4DABD4 = 0x4DAB5C, 0x45F008 = 0). Do exactly that: persist the
- * flag, then queue a reload of the same world (now WeltN, since slice_tut_seen
- * reads the file we just wrote).
+ * The tutorial's last Paradiso finished its pat0020 line (exe 0x4159BD).
+ * Persist tut.ini[world] = 1, then queue a reload of the same world, which now
+ * loads as the normal level since slice_tut_seen reads the file we just wrote.
  */
 static void beh_tutorial_done(void *ctx)
 {
@@ -579,11 +555,9 @@ static void beh_tutorial_done(void *ctx)
 }
 
 /*
- * Arm the world's positional loops (exe level-audio setup 0x412643). World 3
- * starts w3sf01 on slot 8 (electric floor) and w3sf11 on slot 14 (flying
- * robot); world 4 starts w4sf03 on slot 14 (bee). Each starts muted -
- * slice_posloops() rides the volume by distance every tick. Worlds 1/2 have
- * no positional loop; the slots stay clear.
+ * Arm the world's positional loops (exe 0x412643): world 3 = w3sf01 slot 8
+ * (electric floor) + w3sf11 slot 14 (robot), world 4 = w4sf03 slot 14 (bee).
+ * Each starts muted; slice_posloops() rides the volume by distance each tick.
  */
 static void set_world_ambient(slice *s, int world)
 {
@@ -601,9 +575,8 @@ static void set_world_ambient(slice *s, int world)
     }
 }
 
-/* stop every looping / one-shot SFX lane plus the voice channels. Called on
- * any level or menu transition so ambient / proximity loops (electric floor,
- * UFO, bee, glide, boss charge) never bleed across screens. */
+/* Stop every SFX lane plus the voice channels. Called on any level or menu
+ * transition so ambient / proximity loops never bleed across screens. */
 static void slice_audio_hush(slice *s)
 {
     if (!s->audio) return;
@@ -615,23 +588,18 @@ static void slice_audio_hush(slice *s)
 /* ================================================================== *
  *  Positional loops  (exe emitter 0x412EE0 + volume pass 0x41139D)
  *
- *  The exe keeps one looping WAV per slot running for the whole level and
- *  sets its volume each frame from the minimum squared distance, in screen
- *  pixels, between screen centre (FA_FB_W/2, FA_FB_H/2) and the four corners
- *  of any live emitter's sprite box. A corner past a +/-1200 x / +/-900 y
- *  window of centre is ignored (0x412EE0). Volume curve (0x41139D): 0 dB
- *  within 350 px, a ramp linear in distance^2 to about -50 dB by 1063 px,
- *  then silence. The loop is never stopped mid-level - a far emitter is just
- *  gain 0.
+ *  One looping WAV per slot runs the whole level; its volume each frame comes
+ *  from the min squared distance between screen centre and the corners of any
+ *  live emitter's box. Curve: full within 350 px, linear-in-distance^2 ramp to
+ *  ~-50 dB by 1063 px, then silence. A far emitter is just gain 0, never stopped.
  * ================================================================== */
 #define POSLOOP_FULL_PX   350   /* <= : full volume                          */
 #define POSLOOP_FADE_PX  1063   /* >= : muted (sqrt of the exe's 0x113E10)   */
 #define POSLOOP_CULL_X   1200   /* corner ignored past this |dx| ...         */
 #define POSLOOP_CULL_Y    900   /* ... or this |dy| (exe 0x412EE0)           */
 
-/* min squared distance -> lane gain (/256). The exe ramps a dB value
- * linearly in distance^2 from 0 to ~-50 across the band, then hard-mutes;
- * DirectSound turns that dB into amplitude, and so do we. */
+/* min squared distance -> lane gain (/256): a dB value linear in distance^2
+ * from 0 to ~-50 across the band, then hard-mute, converted to amplitude. */
 static int posloop_gain(long d2)
 {
     long full = (long)POSLOOP_FULL_PX * POSLOOP_FULL_PX;
@@ -644,10 +612,9 @@ static int posloop_gain(long d2)
     return g < 0 ? 0 : (g > 256 ? 256 : g);
 }
 
-/* Ride `lane`'s gain from the nearest live emitter of ObjNr `o1` (or `o2`,
- * -1 to skip). `guard` = 1 gates each emitter on fa_beh_emitter_live (the exe
- * rec[0x62] < 100 flyer guard); 0 = any active record emits (the electric
- * floor runs for the whole level once spawned). */
+/* Ride `lane`'s gain from the nearest live emitter of ObjNr `o1` or `o2` (-1
+ * skips). `guard` = 1 gates each emitter on fa_beh_emitter_live; 0 = any
+ * active record emits. */
 static void posloop_update(slice *s, int o1, int o2, int lane, int guard)
 {
     if (!s->audio || !s->ents) return;
@@ -689,9 +656,8 @@ static void slice_posloops(slice *s)
 }
 
 /*
- * Spawn point. The level's ObjNr 1000 (misc_start.jrs) entity record carries
- * the real spawn X/Y - the exe reads it at 0x4118F5. Fall back to the terrain
- * scan when the entity layer is absent (no GData).
+ * Spawn point: the level's ObjNr 1000 entity record carries the X/Y (exe
+ * 0x4118F5). Falls back to a terrain scan when there is no entity layer.
  */
 static void find_spawn(slice *s, int *out_x, int *out_y)
 {
@@ -708,12 +674,12 @@ static void find_spawn(slice *s, int *out_x, int *out_y)
     *out_y = m->world_h - 32;
 }
 
-/* place the kid on solid ground, bind collision, frame the camera. */
+/* place the character on solid ground, bind collision, frame the camera. */
 static void wire_level(slice *s)
 {
     int sx, sy;
     find_spawn(s, &sx, &sy);
-    printf("spawn: kid at %d,%d (world %dx%d)\n", sx, sy,
+    printf("spawn: character at %d,%d (world %dx%d)\n", sx, sy,
            s->map.world_w, s->map.world_h);
     fa_player_init(&s->pl, sx, sy);
     int sx2 = sx + 64;
@@ -733,8 +699,7 @@ static void wire_level(slice *s)
     fa_player_set_ladder(&s->pl2, slice_ladder, &s->map);
     fa_player_set_solid(&s->pl2, slice_solid, &s->coll);
     fa_player_set_pushable(&s->pl2, slice_pushable, s->ents);
-    /* boss arena (exe 0x4DABD4 >= 4): penguin idles only the yawn, Fettalatte
-     * does not idle at all. */
+    /* boss arena: Pinguì idles only the yawn, Milchschnitte does not idle. */
     fa_player_set_boss_arena(&s->pl, s->in_end);
     fa_player_set_boss_arena(&s->pl2, s->in_end);
     if (s->ents)
@@ -777,23 +742,17 @@ static void wire_level(slice *s)
     if (s->ov_cambias != 0) { s->cam.band_t += s->ov_cambias;
                               s->cam.band_b += s->ov_cambias; }
 
-    /* frame 0 camera. Boss arenas (exe ds:0x4dabd4 = world+3) fix the frame -
-     * worlds 1/2/4 lock it, world 3 keeps following; regular levels point at
-     * the spawn (exe 0x4119c8 -> 0x434650). */
+    /* frame 0 camera: boss arenas fix the frame (world 3 keeps following),
+     * regular levels point at the spawn (exe 0x4119c8). */
     if (s->in_end) fa_camera_boss(&s->cam, s->world);
     else fa_camera_intro(&s->cam, fa_player_px(&s->pl), fa_player_py(&s->pl));
 }
 
 /*
- * The two playable kids animate from PINGUIN.W01 / MILCHSCHNITTE.W01. The
- * per-pose frame ranges are the JR_FERRERO.exe state-machine constants: each
- * player state writes {current, loop_start, inclusive_end, repeat} into the
- * character's animation record. `loop` = 1 repeats, 0 holds the last frame.
- *
- * base_facing = -1: the raw art is LEFT-facing; the engine mirrors it for a
- * right-facing player. Advance rate = one frame per 2 ticks (30 fps). The
- * WESTKA sidecars are NOT used for selection - several of their ranges
- * disagree with the engine.
+ * Kid animation clips from PINGUIN.W01 / MILCHSCHNITTE.W01. The per-pose frame
+ * ranges are the exe state-machine constants; `loop` = 1 repeats, 0 holds the
+ * last frame. Raw art is LEFT-facing (mirrored for right), advancing 1 frame
+ * per 2 ticks (30 fps). The WESTKA sidecars disagree and are not used.
  */
 typedef struct { fa_cs_pose pose; int cur, loop_first, end, loop; } kid_clip;
 
@@ -812,7 +771,7 @@ static const kid_clip PENGUIN_CLIPS[] = {
     { FA_CS_IDLE_A,      65,  65,  69, 1 },  /* state 1 idle A - loops for the voice */
     { FA_CS_IDLE_B,      91,  91, 115, 0 },  /* state 1 idle B (yawn) - one pass */
     { FA_CS_SWAP,        65,  65,  69, 1 },  /* switch: loops 65-69 for the voice line */
-    { FA_CS_SWAP_END,    65,  65,  69, 1 },  /* penguin has no turn-back */
+    { FA_CS_SWAP_END,    65,  65,  69, 1 },  /* Pinguì has no turn-back */
 };
 static const kid_clip MILCH_CLIPS[] = {
     { FA_CS_STAND,        0,   0,   0, 1 },  /* state 16/17 */
@@ -821,7 +780,7 @@ static const kid_clip MILCH_CLIPS[] = {
     { FA_CS_JUMP_FALL,   58,  58,  65, 0 },  /* state 22/23 */
     { FA_CS_CROUCH,     259, 259, 266, 0 },  /* state 24/25 down */
     { FA_CS_CROUCH_RISE,267, 267, 272, 0 },  /* state 25 release */
-    /* no glide state for Milch - GLIDE stays unbound (falls back to FALL)   */
+    /* no glide state for Milchschnitte - GLIDE stays unbound (falls back to FALL) */
     { FA_CS_CLIMB,       24,  24,  35, 1 },  /* state 28/29 */
     { FA_CS_PUSH,       172, 172, 190, 1 },  /* state 32/33 */
     { FA_CS_THROW_FWD,  273, 273, 296, 0 },  /* state 30/31 snowball (spawn f291) */
@@ -848,7 +807,7 @@ static void load_kids(slice *s)
         char wp[700];
         snprintf(wp, sizeof wp, "%s/%s", s->gdata, w01[k]);
         if (fa_cs_sheet_open(&s->kid_sheet[k], wp, NULL, -1) != 0) {
-            printf("kid %d: no sprite sheet at %s (using a box)\n", k, wp);
+            printf("character %d: no sprite sheet at %s (using a box)\n", k, wp);
             return;
         }
         fa_cs_anim_init(&s->kid_anim[k], &s->kid_sheet[k]);
@@ -859,7 +818,7 @@ static void load_kids(slice *s)
     bind_kid(&s->kid_anim[1], MILCH_CLIPS,
              (int)(sizeof MILCH_CLIPS / sizeof *MILCH_CLIPS));
     s->have_kids = 1;
-    printf("kids: penguin %d frames, Milchschnitte %d frames\n",
+    printf("characters: Pinguì %d frames, Milchschnitte %d frames\n",
            fa_cs_sheet_frame_count(&s->kid_sheet[0]),
            fa_cs_sheet_frame_count(&s->kid_sheet[1]));
 }
@@ -894,8 +853,8 @@ static fa_cs_pose kid_pose(const fa_player *p)
     }
 }
 
-/* Publish both live player bodies to the enemy layer.  Health, ammo and
- * pickups stay in `slice`, so this view contains no duplicated resources. */
+/* Publish both live player bodies to the enemy layer. Health, ammo and
+ * pickups stay in `slice` and are not duplicated here. */
 static void slice_beh_begin(slice *s)
 {
     if (!s->beh) return;
@@ -936,9 +895,8 @@ static void slice_update_kid_anim(slice *s, fa_player *p, int k,
     if (pose == FA_CS_SWAP && (p->character & 1) &&
         p->swap_timer <= p->t.swap_end_c1)
         pose = FA_CS_SWAP_END;
-    /* Fettalatte's idle ends with the same 150..159 turn-back as the swap:
-     * the exe extends the clip end to 159 once the voice line stops
-     * (0x418E0E). MILCH 150..159 = 10 frames * 2 ticks = 20. */
+    /* Milchschnitte's idle ends with the same 150..159 turn-back as the swap once
+     * the voice line stops (exe 0x418E0E): 10 frames * 2 ticks = 20. */
     if (pose == FA_CS_IDLE_B && (p->character & 1) &&
         p->idle_play > 0 && p->idle_play <= 20)
         pose = FA_CS_SWAP_END;
@@ -957,10 +915,8 @@ static void slice_update_kid_anim(slice *s, fa_player *p, int k,
 }
 
 /*
- * has this world's tutorial been cleared? The exe reads byte world-1 of
- * GData\Save\tut.ini (4 raw bytes) at level load; a 0 byte means "play
- * WeltNt". Missing file -> every tutorial shows. fa_vfs classifies tut.ini to
- * the install dir beside GData.
+ * Has this world's tutorial been cleared? Reads byte world-1 of Save/tut.ini
+ * (0 = show WeltNt). Missing file -> every tutorial shows.
  */
 static int slice_tut_seen(const char *gdata, int world)
 {
@@ -969,8 +925,8 @@ static int slice_tut_seen(const char *gdata, int world)
     return fa_vfs_tut_world_seen(&v, world);
 }
 
-/* The .w01/.w02 suffix for a normal play launch of `world`: "t" (tutorial)
- * until tut.ini says that world is cleared, else "" (0x411682). */
+/* The .w01/.w02 suffix for a normal launch: "t" until tut.ini clears the
+ * world, else "" (exe 0x411682). */
 static const char *slice_world_suffix(const char *gdata, int world, int force_tut)
 {
     return (force_tut || !slice_tut_seen(gdata, world)) ? "t" : "";
@@ -979,8 +935,7 @@ static const char *slice_world_suffix(const char *gdata, int world, int force_tu
 static void enter_world(slice *s, int world)
 {
     slice_audio_hush(s);
-    /* A new run starts in single-player.  The boss transition uses
-     * enter_end() and deliberately keeps the co-op assignment alive. */
+    /* A new run starts in single-player; enter_end() keeps co-op alive. */
     s->coop = 0;
     s->p1_controller = -1;
     s->p2_controller = -1;
@@ -1015,10 +970,8 @@ static void enter_world(slice *s, int world)
 }
 
 /*
- * The boss arena. The exe gates it on all six recipe pieces: hud_draw's
- * caller (0x411365) scans the 6 words at 0x45EFD4 and, when every one is set,
- * writes game state 20 (0x45F008) with target level = world + 4 (0x4DAB5C) -
- * the WeltNE map. WeltNE has no own .W01, so it renders on WeltN.W01.
+ * The boss arena, gated on all six recipe pieces (exe 0x411365 -> state 20,
+ * target level world + 4). WeltNE has no own .W01 and renders on WeltN.W01.
  */
 static void enter_end(slice *s)
 {
@@ -1040,7 +993,7 @@ static void enter_end(slice *s)
         printf("recipe complete -> Welt%dE (boss): world %dx%d px\n",
                world, s->map.world_w, s->map.world_h);
     } else {
-        /* no boss map shipped for this world: stay put, do not re-trigger */
+        /* no boss map for this world: stay put, do not re-trigger */
         s->end_pending = 0;
         s->in_end = 1;
         printf("recipe complete but Welt%dE is absent - staying in Welt%d\n",
@@ -1049,13 +1002,9 @@ static void enter_end(slice *s)
 }
 
 /*
- * the run is over (health hit 0, fa_death's 240-tick KO hold + 16-tick
- * fade have elapsed). The exe (0x41272D -> scene 15, 0x402DE4) plays Start.wav
- * and shows the CLASSIFICA / high-score screen for the world that was played,
- * with the run's score, then the world-select menu. There is no in-place
- * restart and no lives. Tear the level down and bring up that screen; a click
- * on it returns to the menu (the existing s->scores dismiss path, which now
- * also rebuilds the menu and zeroes the score).
+ * The run is over (health 0, KO hold + fade elapsed). Plays Start.wav and
+ * shows the CLASSIFICA / high-score screen for the played world with the run
+ * score, then the menu (exe 0x41272D). No restart, no lives.
  */
 static void begin_after_death(slice *s, int won)
 {
@@ -1073,9 +1022,8 @@ static void begin_after_death(slice *s, int won)
 
     s->scores = fa_hiscore_load(s->gdata);
     if (s->scores) {
-        /* the run was in a world: show that world's table + boss portrait
-         * (Gegner.w01 frame 0x4DABD4), and offer the run's score to the
-         * table - it becomes an editable name row if it places. */
+        /* show that world's table + boss portrait, and offer the run score:
+         * it becomes an editable name row if it places. */
         fa_hiscore_begin(s->scores, s->world - 1, s->score, 1);
     } else {
         slice_set_menu(s, fa_menu_load(s->gdata));      /* no assets: menu */
@@ -1086,11 +1034,39 @@ static void begin_after_death(slice *s, int won)
            won ? "World cleared - boss down" : "run over", s->score, s->world);
 }
 
+/* ESC / controller SELECT in a level: tear the level down and return to the
+ * title / world-select menu. No score screen, no save. */
+static void return_to_menu(slice *s)
+{
+    slice_audio_hush(s);
+    if (s->audio) fa_audio_event(s->audio, FA_SND_MENU_MUSIC);
+
+    fa_beh_free(s->beh);  s->beh = NULL;
+    free_kids(s);
+    fa_hud_free(s->hud);  s->hud = NULL;
+    if (s->have_map) { fa_map_free(&s->map); fa_w01_close(&s->bg); }
+    fa_tileset_free(s->tiles);  s->tiles = NULL;
+    fa_entity_free(s->ents);    s->ents = NULL;
+    s->have_map = 0;
+    s->use_player = 0;
+    s->in_end = 0;
+    s->end_pending = 0;
+    s->boss_win_timer = 0;
+    s->coop = 0;
+    s->p1_controller = -1;
+    s->p2_controller = -1;
+    s->keyboard_roles_swapped = 0;
+    s->score = 0;
+    fa_death_init(&s->death);
+
+    slice_set_menu(s, fa_menu_load(s->gdata));
+    printf("ESC / SELECT -> the menu\n");
+}
+
 static int s_quit(void *user) { return ((slice *)user)->want_quit; }
 
-/* Find the closest world icon in a requested screen direction. The menu
- * already owns the pixel rectangles, so controller navigation uses those
- * decoded regions instead of a second hand-written layout. */
+/* Find the closest world icon in a screen direction, using the menu's own
+ * pixel rectangles rather than a second hand-written layout. */
 static int menu_next_world(const fa_menu *m, int current, int dx, int dy)
 {
     int ox = 400, oy = 300;
@@ -1171,9 +1147,8 @@ static void s_sim(uint64_t tick, const void *input, void *user)
     }
     if (s->end_pending) { enter_end(s); return; }
 
-    /* the tutorial's last Kinder Paradiso finished its line - reload
-     * the same world as the normal level (tut.ini is already written). The
-     * exe (0x4126F3) keeps the score across this reload. */
+    /* tutorial cleared: reload the same world as the normal level, keeping
+     * the score across the reload (exe 0x4126F3). */
     if (s->tut_reload_pending) {
         s->tut_reload_pending = 0;
         int wd = s->world, sc = s->score;
@@ -1182,10 +1157,8 @@ static void s_sim(uint64_t tick, const void *input, void *user)
         return;
     }
 
-    /* the credits screen. Credit1..4.bmp in order, then ENDTITLES,
-     * then the menu. A page auto-advances after FA_CREDITS_PAGE_DWELL ticks;
-     * a click or a JUMP/FIRE press skips to the next page at once (the exe
-     * folds the same input into 0x4DAB44). */
+    /* credits screen: Credit1..4.bmp, then ENDTITLES, then the menu. A page
+     * auto-advances; a click or JUMP/FIRE press skips to the next at once. */
     if (s->credits) {
         uint32_t act = fi->actions;
         uint32_t press = act & ~s->cr_act_was;
@@ -1204,10 +1177,9 @@ static void s_sim(uint64_t tick, const void *input, void *user)
         return;
     }
 
-    /* CLASSIFICA -> the high-score screen. Reached from the menu (CLASSIFICA
-     * button) or after a death (begin_after_death). A click returns to the
-     * menu; if the menu was torn down (a death), rebuild it and zero the
-     * score for the next run (0x41154C). */
+    /* CLASSIFICA / high-score screen, from the menu button or after a death.
+     * A click returns to the menu, rebuilding it and zeroing the score if a
+     * death tore it down (exe 0x41154C). */
     if (s->show_scores && !s->scores) {
         s->scores = fa_hiscore_load(s->gdata);
         s->show_scores = 0;
@@ -1276,9 +1248,14 @@ static void s_sim(uint64_t tick, const void *input, void *user)
     }
 
     if (s->use_player) {
+        if ((fi->edit_pressed & FA_EDIT_ESCAPE) ||
+            (fi->pad_pressed & (1u << FA_PAD_BACK))) {
+            return_to_menu(s);
+            return;
+        }
         if (slice_join_coop(s, fi)) {
-            /* The join edge is consumed as a mode change; movement starts on
-             * the following fixed tick, avoiding an accidental jump/throw. */
+            /* consume the join edge; movement starts next tick so the press
+             * is not an accidental jump/throw. */
             return;
         }
         m = slice_player_actions(s, fi, 0);
@@ -1293,17 +1270,14 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             if (teleport) slice_teleport_milch(s);
         }
 
-        /* DEV: P toggles free / no-clip movement - fly straight to the
-         * recipe pieces instead of walking the level. Pickup collection,
-         * the camera and the 6-piece boss gate all still run; gravity,
-         * terrain collision, lifts and enemy damage are bypassed. */
+        /* DEV: P toggles no-clip fly. Pickups, camera and the boss gate still
+         * run; gravity, terrain, lifts and enemy damage are bypassed. */
         if (fi->dbg_pressed & FA_DBG_FREEMOVE) {
             s->freemove = !s->freemove;
             printf("free-move %s\n", s->freemove ? "ON" : "OFF");
         }
 
-        /* DEV: I skips straight to this world's boss arena (Welt<N>E) so a
-         * boss can be tested without replaying the whole level. */
+        /* DEV: I skips straight to this world's boss arena. */
         if ((fi->dbg_pressed & FA_DBG_BOSS) && !s->coop &&
             !s->in_end && !s->end_pending &&
             s->world >= 1 && s->world <= 4) {
@@ -1312,12 +1286,9 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             printf("skip -> Welt%dE boss arena\n", s->world);
         }
 
-        /* the kid is dead. The run is over - but the LEVEL KEEPS
-         * RUNNING for the 240-tick KO hold (exe case 1 / 0x41110B loops the
-         * whole entity table with no death guard), then a 16-tick fade, then
-         * the CLASSIFICA screen + the menu (begin_after_death). The player is
-         * locked out of input and just runs its physics (gravity + terrain)
-         * so the corpse arcs down and lands; the render forces the KO pose. */
+        /* the character is dead. The level keeps running through the KO hold + fade
+         * (exe 0x41110B), then begin_after_death. Input is locked; the body
+         * runs physics so it arcs down and lands, render forces the KO pose. */
         if (fa_death_phase_of(&s->death) != FA_DEATH_ALIVE) {
             fa_death_tick(&s->death);
             if (fa_death_phase_of(&s->death) == FA_DEATH_DONE) {
@@ -1352,9 +1323,8 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             return;
         }
 
-        /* the boss is down, its 7th recipe piece dropped, and the player has
-         * caught it (fa_beh beh_i7). The level is complete - to the
-         * CLASSIFICA / high-score screen. */
+        /* boss down, 7th recipe piece caught (fa_beh beh_i7): level complete,
+         * go to the CLASSIFICA screen. */
         if (s->in_end && s->beh && fa_beh_recipe_done(s->beh)) {
             if (s->audio) fa_audio_event(s->audio, FA_SND_PICKUP);
             printf("World %d complete (score %d) -> CLASSIFICA\n",
@@ -1363,17 +1333,15 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             return;
         }
 
-        /* tick the object runtime FIRST so the player's collision
-         * probe sees lifts / blocks / fallers at their new positions this
-         * tick (fixes the raft fall-pose and lets blocks stay solid). */
+        /* tick the object runtime FIRST so the player's collision probe sees
+         * lifts / blocks / fallers at their new positions this tick. */
         slice_beh_begin(s);
         if (s->ents)
             fa_entity_tick(s->ents, s->cam.x, s->cam.y, FA_FB_W, FA_FB_H);
 
-        /* PRE-tick: if the kid rides a platform, plant his feet on the
-         * (now-moved) deck so fa_player_tick's own collision grounds him
-         * THIS tick - otherwise crouch / throw (gated on the post-collide
-         * on_ground) fail while the platform moves. */
+        /* PRE-tick: if the character rides a platform, plant its feet on the moved
+         * deck so fa_player_tick grounds it this tick; otherwise crouch /
+         * throw fail while the platform moves. */
         int on_lift = 0, lift_top = 0, lift_dx = 0;
         int on_lift2 = 0, lift_top2 = 0, lift_dx2 = 0;
         if (!s->freemove && s->ents && s->pl.vy >= 0 && s->pl.state != FA_PST_JUMP) {
@@ -1423,7 +1391,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
         } else {
             if (s->ammo <= 0) m &= ~(1u << FA_ACT_FIRE);   /* AC4: no snowballs */
             fa_player_tick(&s->pl, m);   /* FA_PI_* == (1u<<FA_ACT_*) */
-            /* Reserve Penguin's shared ammo before ticking player 2, so two
+            /* Reserve Pinguì's shared ammo before ticking player 2, so two
              * simultaneous fire presses cannot consume one final snowball
              * twice. */
             if (s->ammo > 0 && s->pl.throw_anim > 0 && !s->thr_was) {
@@ -1432,8 +1400,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             }
         }
         if (s->coop) {
-            /* Milchschnitte keeps her character-1 movement rules: lower
-             * jump, no penguin glide, and the normal push/climb states. */
+            /* Milchschnitte keeps character-1 rules: lower jump, no glide. */
             if (s->freemove) {
                 int spd2 = (m2 & (1u << FA_ACT_JUMP)) ? 12 : 6;
                 int dx2 = 0, dy2 = 0;
@@ -1456,12 +1423,11 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             s->pl2.idle_kind = s->pl2.idle_play = s->pl2.idle_sound = 0;
             s->pl2.idle_timer = s->pl2.t.idle_delay;
         }
-        /* the swap voice line starts when the swap starts; the swap lock
-         * length is that line's duration. */
+        /* the swap voice line starts with the swap; the lock lasts its length. */
         int swap_now  = (s->pl.state == FA_PST_SWAP);
         int jump_now  = (s->pl.state == FA_PST_JUMP);
         int thr_now   = (s->pl.throw_anim > 0);
-        int glide_now = (s->pl.gliding != 0);       /* penguin only */
+        int glide_now = (s->pl.gliding != 0);       /* Pinguì only */
         int jump_now2 = s->coop && (s->pl2.state == FA_PST_JUMP);
         int thr_now2  = s->coop && (s->pl2.throw_anim > 0);
         int glide_now2 = s->coop && (s->pl2.gliding != 0);
@@ -1470,10 +1436,8 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             if (!s->coop && swap_now && !s->swap_was)
                 fa_audio_event(s->audio, c1 == 0 ? FA_SND_SWAP_P2M
                                                  : FA_SND_SWAP_M2P);
-            /* alsf01 only on a REAL jump (jump_hold is set by the input-edge
-             * jump). A hit / hazard knockback also puts the kid in JUMP state
-             * but must not play the jump sound - the hit sound below owns
-             * that moment. */
+            /* alsf01 only on a real jump (jump_hold set): a knockback also
+             * enters JUMP state but the hit sound owns that moment. */
             if (jump_now && !s->jump_was && s->pl.jump_hold > 0)
                 fa_audio_event(s->audio, c1 ? FA_SND_JUMP_M : FA_SND_JUMP_P);
             if (thr_now && !s->thr_was)
@@ -1486,10 +1450,8 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                 fa_audio_event(s->audio, FA_SND_GLIDE);
             if (!glide_now && s->glide_was)         /* exe stops lane 0 on */
                 fa_audio_stop(s->audio, 0);         /* glide exit: 0x422e04(0) */
-            /* idle voice line on the idle_kind rising edge (state 1 / state
-             * 17; channel 17). Player 1 only. Penguin idle A picks A1/A2 and
-             * Fettalatte picks 1/2 by s->pl.idle_sound; penguin idle B is the
-             * yawn. */
+            /* idle voice line on the idle_kind rising edge, player 1 only.
+             * idle_sound picks the A1/A2 (or 1/2) variant; idle B is the yawn. */
             if (s->pl.idle_kind && !s->idle_was) {
                 fa_snd_event ev = FA_SND_NONE;
                 if (!c1)
@@ -1522,24 +1484,17 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             int px2 = fa_player_px(&s->pl2), py2 = fa_player_py(&s->pl2);
             int face2 = (s->pl2.facing == FA_FACE_RIGHT) ? 1 : -1;
 
-            /* the pickup / hit test spans the kid's whole sprite plus the
-             * overhead reach (items sit in tree-tops and along the vines;
-             * the exe collects during the climb too) - not the narrow 10 px
-             * collision core */
-            /* full-sprite AABB, same dims the enemy layer uses for the kid
-             * (slice_beh_begin: half_w 40, height 190 / crouch 100). body_h
-             * is a ~44 px collision core - far shorter than the drawn sprite,
-             * so a head-height item never entered the old box. */
+            /* pickup / hit test uses the full-sprite AABB (half_w 40, height
+             * 190 / crouch 100) plus an overhead reach, not the ~44 px
+             * collision core - items sit in tree-tops and along the vines. */
             int pfull = (s->pl.state == FA_PST_CROUCH) ? 100 : 190;
             int gw  = 40;
             int gcy = py - pfull / 2;
             int gh  = pfull / 2 + 10;                    /* +10 overhead reach */
 
-            /* Fettalatte shoving a block: a committed clip; on its
-             * frame-176 event (~tick 8) one impulse sets the block's float
-             * vx to +/-7.0 and beh_block slides + friction-decays it. The
-             * kid does NOT ride the block - the shove ends the clip, then the
-             * player must walk up to the block again to shove it once more. */
+            /* Milchschnitte shoving a block: on the frame-176 event (~tick 8)
+             * one impulse sets the block vx to +/-7.0 and beh_block slides it.
+             * The character does not ride the block; each shove is a fresh approach. */
             if (s->pl.state == FA_PST_PUSH && s->beh) {
                 int probx = px + face * (s->pl.t.body_hw + 8);
                 if (s->pl.push_timer == 8 &&
@@ -1554,9 +1509,8 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             }
 
             /* POST-tick: carry the platform's horizontal drift and re-plant
-             * the feet (fa_player_tick's collide may have nudged them).
-             * Skipped once the kid jumps off (state JUMP / vy < 0). Every
-             * action state is preserved. */
+             * the feet, preserving the action state. Skipped once the character
+             * jumps off. */
             if (on_lift && s->pl.state != FA_PST_JUMP) {
                 s->pl.x += FA_FIX(lift_dx);
                 s->pl.y  = FA_FIX(lift_top);
@@ -1596,9 +1550,8 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                 }
             }
 
-            /* enemy contact + enemy projectiles. No stomp - falling
-             * onto an enemy is the same 20-damage overlap (0x41A3E0 never
-             * reads player vy); only the 120-tick i-frames suppress it. */
+            /* enemy contact + projectiles. No stomp: any overlap is 20 damage
+             * (exe 0x41A3E0 ignores vy), suppressed only by the i-frames. */
             int kb = 0;
             int dmg = s->beh ? fa_beh_post(s->beh, &kb) : 0;
             (void)kb;
@@ -1615,7 +1568,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                 s->death_player = hit_player;
                 if (s->audio) {
                     /* the hit sound follows the CHARACTER, not the pad slot:
-                     * Milchschnitte -> ms0007, Penguin -> pi0005. */
+                     * Milchschnitte -> ms0007, Pinguì -> pi0005. */
                     int ms = hit_player ? 1 : (s->pl.character & 1);
                     fa_audio_event(s->audio, ms
                                    ? FA_SND_HIT_M : FA_SND_HIT_P);
@@ -1623,10 +1576,9 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                 printf("hit! health %d\n", s->health);
             }
 
-            /* (fcn.0041A290) standing on a plane-2 hazard tile
-             * (attr & 0x80) deals 20 + 120 i-frames when not already in
-             * i-frames, plays the character hit sound, and ALWAYS bounces
-             * the kid up (vy = -20.0) so he cannot sit in it. */
+            /* standing on a plane-2 hazard tile (exe fcn.0041A290): 20 damage
+             * + 120 i-frames + hit sound when not already invulnerable, and
+             * always a vy = -20.0 bounce so the character cannot sit in it. */
             int hazard0 = !s->freemove &&
                 slice_hazard(&s->map, fa_player_px(&s->pl),
                              fa_player_py(&s->pl));
@@ -1656,8 +1608,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
             }
             if (s->hurt_cd > 0) s->hurt_cd--;
 
-            /* the boss is down - its 7th recipe piece drops in
-             * (fa_beh beh_i7); catch it to finish the level. */
+            /* boss down: its 7th recipe piece drops in (fa_beh beh_i7). */
             if (s->in_end && s->beh && fa_beh_boss_defeated(s->beh) &&
                 !s->boss_win_timer) {
                 s->boss_win_timer = 1;          /* one-shot: log it once */
@@ -1665,12 +1616,9 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                        "7th recipe piece\n", s->world, s->score);
             }
 
-            /* health hit 0 -> the run is over. Start the KO sequence
-             * (exe 0x417419: player state -> KO, 0x4E0B44 = 0xF0). The exe
-             * launches the body once (0x431A00/0x431A20: vx +/-18, vy -6, in
-             * 20.12 -> px/tick); the shared integrator then arcs + lands it.
-             * Handled by the fa_death branch at the top of the block from the
-             * next tick. */
+            /* health 0: start the KO sequence (exe 0x417419). Launch the body
+             * once (vx +/-18, vy -6); the integrator then arcs and lands it.
+             * The fa_death branch above takes over from the next tick. */
             if (s->health <= 0 && !fa_death_active(&s->death) && !s->freemove) {
                 fa_player *dead = s->death_player ? &s->pl2 : &s->pl;
                 int face = dead->character & 1 ? 1 : -1;   /* 0x4E1020 sign */
@@ -1706,13 +1654,10 @@ static void s_sim(uint64_t tick, const void *input, void *user)
     else { s->cam.x += vx; s->cam.y += vy; }
 }
 
-/* the exe installs the player renderer (0x41A780) as the PLANE 2
- * per-plane hook (0x417150 -> 0x432820(2, ...)), so the kid + thrown
- * snowballs draw mid-scene - AFTER plane-2 tiles and band-0 entities, and
- * BEFORE plane-2 band-2 entities and the foreground tile planes 3/4. That
- * is what lets the jungle spikes and the factory pipes pass in front of
- * the kid. Enemy projectiles, HUD and the death fade stay on top (their
- * exe passes run after the whole scene). */
+/* The character + thrown snowballs draw as the plane-2 hook (exe 0x41A780), after
+ * plane-2 tiles / band-0 entities but before band-2 entities and planes 3/4,
+ * so jungle spikes and factory pipes pass in front of the character. Projectiles,
+ * HUD and the death fade stay on top. */
 static void slice_draw_player(slice *s, const fa_surface *dst,
                               const fa_camera *cam, const fa_player *p,
                               int k, int blink)
@@ -1720,8 +1665,7 @@ static void slice_draw_player(slice *s, const fa_surface *dst,
     int px = fa_player_px(p) - cam->x;
     int py = fa_player_py(p) - cam->y;
     long drawn = -1;
-    /* blink the kid through the i-frame window - hidden on
-     * alternate ~7 px of the countdown. Not while dying. */
+    /* blink the character through the i-frame window, but not while dying. */
     if (s->have_kids && !blink)
         drawn = fa_cs_anim_draw(&s->kid_anim[k], dst, px, py, NULL);
     else if (blink)
@@ -1745,9 +1689,8 @@ static void slice_plane_hook(void *ud, const fa_surface *dst,
     if (s->coop)
         slice_draw_player(s, dst, cam, &s->pl2, 1, blink);
 
-    /* thrown snowball = PINGUIN.W01 frame 261 (0x105, Schneeball); the "dirty"
-     * black ball after collect_dirtyballs is frame 232 (0xE8) - the exe's
-     * snowball-slot type doubles as the sprite frame (spawn 0x41A268). */
+    /* thrown snowball = PINGUIN.W01 frame 261; the "dirty" ball after
+     * collect_dirtyballs is frame 232 (exe spawn 0x41A268). */
     const fa_w01 *proj_w = s->have_kids ? &s->kid_sheet[0].w01 : NULL;
     int proj_f = s->dirty_shot ? 232 : 261;
     const fa_player *players[2] = { &s->pl, &s->pl2 };
@@ -1791,14 +1734,12 @@ static void s_render(double alpha, uint16_t *fb, int w, int h, size_t pitch,
 
     if (s->have_map) {
         fa_scene sc = { &s->bg, &s->map, s->tiles, s->ents, s->grid, NULL, NULL };
-        sc.on_plane = slice_plane_hook;   /* kid + snowballs at plane 2 */
+        sc.on_plane = slice_plane_hook;   /* character + snowballs at plane 2 */
         sc.on_plane_ud = s;
         fa_render_scene(&dst, &sc, &s->cam);
         if (s->use_player) {
-            /* enemy projectiles render from the THROWER's own sheet at a
-             * per-enemy frame (0x40AF80): kong/ape 5 -> frame 16 is a banana,
-             * yeti 7 -> 25, snowman 8 -> 54, egg 12 -> 23, bear 15 -> 53,
-             * gorilla boss 10 -> 87 (coconut). */
+            /* enemy projectiles render from the thrower's own sheet at a
+             * per-ObjNr frame (exe 0x40AF80). */
             for (int i = 0; s->beh && i < FA_BEH_PROJ_MAX; i++) {
                 int wx, wy, oo = 0;
                 if (!fa_beh_projectile(s->beh, i, &wx, &wy, &oo)) continue;
@@ -1822,11 +1763,8 @@ static void s_render(double alpha, uint16_t *fb, int w, int h, size_t pitch,
                     fa_fill(&dst, &b, NULL, fa_rgb565(150, 90, 40));
                 }
             }
-            /* the status panel over the scene. In the
-             * boss arena (exe hud_draw 0x408B9B, flag 0x45ECBC) the boss bar
-             * REPLACES the 6 recipe-piece icons - BossInterface frame + a
-             * Boss/Energy fill by HP + a Bosspics portrait. -1 boss_hp = the
-             * normal 6-icon HUD. */
+            /* status panel. In the boss arena (exe 0x408B9B) the boss bar
+             * replaces the 6 recipe icons; boss_hp = -1 keeps the normal HUD. */
             int boss_hp = (s->in_end && s->beh) ? fa_beh_boss_hp(s->beh) : -1;
             if (s->hud)
                 fa_hud_render(s->hud, &dst, s->score, s->health, s->ammo,
@@ -1834,10 +1772,9 @@ static void s_render(double alpha, uint16_t *fb, int w, int h, size_t pitch,
                               s->coop ? 0 : s->pl.character,
                               boss_hp, s->world - 1);
 
-            /* the end-of-run fade (exe 0x45ED42 = 0x10, step 1). No alpha
-             * blend on fa_surface, so a 16-step screen-door dissolve to
-             * black - the exe's fades are dither. fade counts 16 -> 0;
-             * row y goes black once (y & 15) >= fade. */
+            /* end-of-run fade: a 16-step screen-door dissolve to black (no
+             * alpha blend on fa_surface). fade counts 16 -> 0; row y goes
+             * black once (y & 15) >= fade. */
             int fade = fa_death_fade_amount(&s->death);
             if (fade > 0 && fade < FA_DEATH_FADE_TICKS) {
                 for (int y = 0; y < h; y++) {
@@ -1865,8 +1802,8 @@ static int s_audio(int16_t *buf, int max_frames, int rate, int channels,
     slice *s = (slice *)user;
     if (rate <= 0 || channels <= 0) return 0;
 
-    /* with GData the real mixer owns the buffer (music + SFX + voice).
-     * The 440 Hz tone is only the no-GData dev aid. */
+    /* with GData the real mixer owns the buffer; the 440 Hz tone is the
+     * no-GData dev aid. */
     if (s->audio && channels == 2) {
         if (max_frames > 4096) max_frames = 4096;
         return fa_audio_mix(s->audio, buf, max_frames);
@@ -1897,10 +1834,9 @@ static int s_audio(int16_t *buf, int max_frames, int rate, int channels,
 }
 
 /*
- * Load a level under `maps`, tolerating the shipped case mix. `w01suf` and
- * `w02suf` name the background / map variant: "" + "" = the main world,
- * "t" + "t" = the tutorial (WeltNt), "" + "E" = the boss arena (WeltNE.W02
- * on the parent world's WeltN.W01 - there is no WeltNE.W01).
+ * Load a level under `maps`. `w01suf` / `w02suf` pick the variant: "" + "" =
+ * main world, "t" + "t" = tutorial, "" + "E" = boss arena (WeltNE.W02 on the
+ * parent world's WeltN.W01; there is no WeltNE.W01).
  */
 static int load_world(slice *s, const char *maps, int world,
                       const char *w01suf, const char *w02suf)
@@ -1952,15 +1888,31 @@ static int dir_has_gdata(const char *dir)
     return 0;
 }
 
-/* Fill `out` with a GData path to try: --gdata, the NRO directory/GData,
- * and the conventional Switch SD-card locations. The NRO path comes from
- * argv[0]; unlike a desktop CWD it is stable when hbmenu launches the app. */
+/* No GData tree found: report and stop. Shows a message box when SDL2 is in
+ * the build so a double-click launch is not a silent failure. */
+static int fatal_no_gdata(const char *path)
+{
+    (void)path;
+    static const char msg[] =
+        "GData folder not found.\n\n"
+        "The GData assets folder from the Fresh Adventures CD-ROM is required.";
+    fprintf(stderr, "%s\n", msg);
+#if defined(FA_HAVE_SDL2)
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "OpenFA", msg, NULL);
+#endif
+    return 1;
+}
+
+/* Fill `out` with a GData path to try: --gdata, then the executable's own
+ * directory, then platform fallbacks (Switch SD card, XDG data home), then a
+ * bare "GData". The exe dir is used because launchers rarely set the CWD. */
 static void find_gdata(const char *arg, const char *exe_path,
                        char *out, size_t cap)
 {
     if (arg && *arg) { snprintf(out, cap, "%s", arg); return; }
 
 #if defined(_WIN32)
+    (void)exe_path;                     /* GetModuleFileNameA is used instead */
     char exe[MAX_PATH];
     DWORD n = GetModuleFileNameA(NULL, exe, sizeof exe);
     if (n > 0 && n < sizeof exe) {
@@ -1986,8 +1938,7 @@ static void find_gdata(const char *arg, const char *exe_path,
         }
     }
 
-    /* These cover both a directory install and a convenient root-level
-     * layout used while copying a user's legally-owned GData tree. */
+    /* a directory install plus a convenient SD-card root layout */
     const char *cands[] = {
         "sdmc:/switch/freshadventures/GData",
         "sdmc:/switch/FreshAdventures/GData",
@@ -1996,6 +1947,66 @@ static void find_gdata(const char *arg, const char *exe_path,
     for (size_t i = 0; i < sizeof cands / sizeof cands[0]; i++) {
         if (dir_has_gdata(cands[i])) {
             snprintf(out, cap, "%s", cands[i]);
+            return;
+        }
+    }
+#else
+    /* POSIX desktop: <exe dir>/GData. */
+    char base[700];
+    base[0] = '\0';
+
+    /* An AppImage runs from a throwaway mount, so /proc/self/exe is useless;
+     * $APPIMAGE is the .AppImage file itself - look beside that. */
+    const char *appimg = getenv("APPIMAGE");
+    if (appimg && appimg[0]) {
+        char d[700];
+        snprintf(d, sizeof d, "%s", appimg);
+        char *s = strrchr(d, '/');
+        if (s) {
+            *s = '\0';
+            char cand[760];
+            snprintf(cand, sizeof cand, "%s/GData", d);
+            if (dir_has_gdata(cand) && strlen(cand) + 1 <= cap) {
+                snprintf(out, cap, "%s", cand);
+                return;
+            }
+        }
+    }
+
+#  if defined(__linux__)
+    ssize_t ln = readlink("/proc/self/exe", base, sizeof base - 1);
+    if (ln > 0) base[ln] = '\0'; else base[0] = '\0';
+#  endif
+    if (!base[0] && exe_path && strchr(exe_path, '/'))
+        snprintf(base, sizeof base, "%s", exe_path);
+    if (base[0]) {
+        char *slash = strrchr(base, '/');
+        if (slash) {
+            *slash = '\0';
+            char cand[760];
+            snprintf(cand, sizeof cand, "%s/GData", base);
+            if (dir_has_gdata(cand) && strlen(cand) + 1 <= cap) {
+                snprintf(out, cap, "%s", cand);
+                return;
+            }
+        }
+    }
+
+    /* XDG data-home fallback: $XDG_DATA_HOME/OpenFA/GData or
+     * ~/.local/share/OpenFA/GData - also the path the Flatpak manifest
+     * exposes, so one copy works sandboxed or not. */
+    {
+        const char *xdg = getenv("XDG_DATA_HOME");
+        const char *home = getenv("HOME");
+        char cand[760];
+        if (xdg && xdg[0])
+            snprintf(cand, sizeof cand, "%s/OpenFA/GData", xdg);
+        else if (home && home[0])
+            snprintf(cand, sizeof cand, "%s/.local/share/OpenFA/GData", home);
+        else
+            cand[0] = '\0';
+        if (cand[0] && dir_has_gdata(cand) && strlen(cand) + 1 <= cap) {
+            snprintf(out, cap, "%s", cand);
             return;
         }
     }
@@ -2068,10 +2079,10 @@ int main(int argc, char **argv)
                    "black bars)\n"
                    "  physics tuning (px/tick): --gravity 0.6 --jumpvel 11 "
                    "--jumpvel2 9 --runspeed 5 --airaccel 1.2\n"
-                   "    (--jumpvel = penguin, --jumpvel2 = Fettalatte; D switches)\n"
+                   "    (--jumpvel = Pinguì, --jumpvel2 = Milchschnitte; D switches)\n"
                    "  collision (px): --bboxw 10 --bboxh 44\n"
                    "  camera (px, exe-pinned): --camrail 130 (screen column "
-                   "the kid rides, flips with facing) --camband 200 (vertical "
+                   "the character rides, flips with facing) --camband 200 (vertical "
                    "follow-band height) --cambias 0 (shift the band; + = look "
                    "down)\n");
             return 0;
@@ -2107,6 +2118,11 @@ int main(int argc, char **argv)
     find_gdata(gdata_arg, (argc > 0) ? argv[0] : NULL,
                s.gdata, sizeof s.gdata);
     char *gdata = s.gdata;
+
+    /* No assets, no game. Only --frames and the --tone / --grid test pattern
+     * may run without a GData tree. */
+    if (!dir_has_gdata(gdata) && frames <= 0 && !tone && !grid)
+        return fatal_no_gdata(gdata);
 
     /* the mixer needs the GData directory. */
     if (!mute && dir_has_gdata(gdata)) {
@@ -2182,7 +2198,7 @@ int main(int argc, char **argv)
 
     fa_platform_cfg cfg;
     memset(&cfg, 0, sizeof cfg);
-    cfg.title = "Fresh Adventures";
+    cfg.title = "OpenFA";
     cfg.want_audio = 1;
     cfg.integer_scale = crisp ? 1 : 0;   /* default: fill the window/screen */
     cfg.window_scale = win_scale;

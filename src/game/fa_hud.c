@@ -211,7 +211,7 @@ void fa_hud_render(const fa_hud *h, const struct fa_surface *dst,
         }
     }
 
-    /* 5. the active-kid portrait */
+    /* 5. the active-character portrait */
     if (h->actors.n)
         sheet_draw(&h->actors, dst, (character & 1) ? 1 : 0);
 

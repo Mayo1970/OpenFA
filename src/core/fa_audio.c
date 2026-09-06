@@ -9,6 +9,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+
+#ifndef S_ISDIR
+#  define S_ISDIR(m)  (((m) & S_IFDIR) != 0)
+#endif
 
 #ifndef FA_PI
 #define FA_PI 3.14159265358979323846
@@ -139,6 +144,7 @@ typedef struct {
 
 struct fa_audio {
     char       gdata[512];
+    char       voice_lang[4];             /* "ita"/"ger": picked disc voice set */
     int        master;                   /* /256, port-only global scale */
     int        music_gain;               /* /256, from line 21 */
     int        sfx_gain;                 /* /256, from line 22 */
@@ -154,10 +160,43 @@ struct fa_audio {
 
 /* ---- gdata path with the fa_menu-style case-fold fallback ---------- */
 
-static int wav_open_rel(fa_wav *w, const char *gdata, const char *rel)
+static int dir_exists(const char *path)
 {
-    char path[768], low[768];
-    snprintf(path, sizeof path, "%s/%s", gdata, rel);
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+/* The disc ships one voice set under SDat/voices/<lang>. Scripts and tables
+ * all spell it "ita"; if that folder is missing but "ger" is there, use "ger".
+ * Prefer "ita" when both exist. */
+static void pick_voice_lang(fa_audio *a)
+{
+    char p[600];
+    snprintf(p, sizeof p, "%s/SDat/voices/ita", a->gdata);
+    if (dir_exists(p)) { strcpy(a->voice_lang, "ita"); return; }
+    snprintf(p, sizeof p, "%s/SDat/voices/ger", a->gdata);
+    if (dir_exists(p)) { strcpy(a->voice_lang, "ger"); return; }
+    a->voice_lang[0] = 0;
+}
+
+/* Redirect a hard-coded "SDat/voices/ita/..." path to the picked language
+ * folder. Copies into buf; returns rel unchanged when no rewrite applies. */
+static const char *apply_voice_lang(const fa_audio *a, const char *rel,
+                                    char *buf, size_t bufsz)
+{
+    const char pfx[] = "SDat/voices/ita/";
+    size_t pl = sizeof pfx - 1;
+    if (!a->voice_lang[0] || strcmp(a->voice_lang, "ita") == 0) return rel;
+    if (strncmp(rel, pfx, pl) != 0) return rel;
+    snprintf(buf, bufsz, "SDat/voices/%s/%s", a->voice_lang, rel + pl);
+    return buf;
+}
+
+static int wav_open_rel(fa_wav *w, const fa_audio *a, const char *rel)
+{
+    char path[768], low[768], langbuf[768];
+    rel = apply_voice_lang(a, rel, langbuf, sizeof langbuf);
+    snprintf(path, sizeof path, "%s/%s", a->gdata, rel);
     if (fa_wav_open_file(w, path) == 0) return 0;
 
     size_t n = strlen(rel);
@@ -167,7 +206,7 @@ static int wav_open_rel(fa_wav *w, const char *gdata, const char *rel)
         low[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
     }
     low[n] = 0;
-    snprintf(path, sizeof path, "%s/%s", gdata, low);
+    snprintf(path, sizeof path, "%s/%s", a->gdata, low);
     return fa_wav_open_file(w, path);
 }
 
@@ -192,7 +231,7 @@ static const snd_def SND_TBL[FA_SND__COUNT] = {
     [FA_SND_JUMP_M]       = { "SDat/alsf01.wav",  1, 0 },
     [FA_SND_THROW_P]      = { "SDat/alsf07.wav",  0, 0 },
     [FA_SND_THROW_M]      = { "SDat/alsf07.wav",  1, 0 },
-    /* penguin glide/flight: glide-state entry 0x41858F plays sample
+    /* Pinguì glide/flight: glide-state entry 0x41858F plays sample
      * [0x4dac3e] (preloaded at 0x41204d) on lane 0, once; stopped by
      * 0x422E04(0) on glide exit. The exe's string is "GData\SDat\alsf02.wav",
      * but ALSF02_old.wav is the take that matches the original - the shipped
@@ -206,7 +245,7 @@ static const snd_def SND_TBL[FA_SND__COUNT] = {
     [FA_SND_PUSH]         = { "SDat/schieben.wav", 6, 0 },
     [FA_SND_ENEMY_DEFEAT] = { "SDat/alsf04.wav",   3, 0 },
     [FA_SND_ENEMY_KNOCK]  = { "SDat/alsf05.wav",   4, 0 },
-    /* the enemy throw uses the same alsf07 as the kid's snowball throw
+    /* the enemy throw uses the same alsf07 as the character's snowball throw
      * (ds:0x4DAC6E, loaded at 0x41208F); per-enemy grunts are a follow-up. */
     [FA_SND_ENEMY_THROW]     = { "SDat/alsf07.wav", 5, 0 },
     [FA_SND_ENEMY_THROW_EGG] = { "SDat/w3sf02.wav", 5, 0 },
@@ -256,6 +295,7 @@ fa_audio *fa_audio_create(const char *gdata_dir)
     if (gdata_dir) {
         strncpy(a->gdata, gdata_dir, sizeof a->gdata - 1);
         a->gdata[sizeof a->gdata - 1] = 0;
+        pick_voice_lang(a);
     }
     a->master = 256;
     a->music_gain = 256;
@@ -317,7 +357,7 @@ int fa_audio_load(fa_audio *a, const char *rel_path)
     if (a->nclips >= FA_MAX_CLIPS) return -1;
 
     fa_wav w;
-    if (wav_open_rel(&w, a->gdata, rel_path) != 0) return -1;
+    if (wav_open_rel(&w, a, rel_path) != 0) return -1;
 
     resampler r;
     if (rs_init(&r, w.rate, w.channels) != 0) { fa_wav_close(&w); return -1; }
@@ -376,7 +416,7 @@ int fa_audio_play_stream(fa_audio *a, const char *rel_path, int channel, int loo
     if (!a || channel < FA_CH_MUSIC || channel > FA_CH_BOSS) return -1;
     fa_stream *s = &a->str[channel - FA_CH_MUSIC];
     stream_stop(s);
-    if (wav_open_rel(&s->wav, a->gdata, rel_path) != 0) { memset(s, 0, sizeof *s); return -1; }
+    if (wav_open_rel(&s->wav, a, rel_path) != 0) { memset(s, 0, sizeof *s); return -1; }
     if (rs_init(&s->rs, s->wav.rate, s->wav.channels) != 0) {
         fa_wav_close(&s->wav);
         memset(s, 0, sizeof *s);

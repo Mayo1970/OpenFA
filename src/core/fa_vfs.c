@@ -169,13 +169,17 @@ int fa_vfs_init_default(fa_vfs *v, const char *gdata_dir, const char *app)
 {
     if (!gdata_dir || !gdata_dir[0]) return -1;
 
-    /* The writable root sits beside the game: the directory that holds the
-     * GData tree and the original executable. Save/, Log/, Option.ini, the
-     * high-score tables and tut.ini land there, next to GData, not inside
-     * it. */
+    /* The writable root is a Data/ folder beside the game: the directory that
+     * holds the GData tree and the original executable. Save/, Log/,
+     * Option.ini, the high-score tables and tut.ini land in Data/, next to
+     * GData, not inside it. */
     char root[FA_VFS_PATH_MAX];
-    if (parent_dir(gdata_dir, root, sizeof root) == 0 && dir_is_writable(root))
-        return fa_vfs_init(v, gdata_dir, root);
+    if (parent_dir(gdata_dir, root, sizeof root) == 0 && dir_is_writable(root)) {
+        char data_root[FA_VFS_PATH_MAX];
+        if ((size_t)snprintf(data_root, sizeof data_root, "%s/Data", root)
+            < sizeof data_root)
+            return fa_vfs_init(v, gdata_dir, data_root);
+    }
 
     /* The install directory is read-only (a locked Program Files install, a
      * mounted image, a console content partition). Fall back to a per-user
@@ -183,7 +187,10 @@ int fa_vfs_init_default(fa_vfs *v, const char *gdata_dir, const char *app)
     char udir[FA_VFS_PATH_MAX];
     if (fa_user_dir(app ? app : "FreshAdventures", udir, sizeof udir) != 0)
         return -1;
-    return fa_vfs_init(v, gdata_dir, udir);
+    char udata[FA_VFS_PATH_MAX];
+    if ((size_t)snprintf(udata, sizeof udata, "%s/Data", udir) >= sizeof udata)
+        return -1;
+    return fa_vfs_init(v, gdata_dir, udata);
 }
 
 /* ----------------------------------------------------------- resolution */

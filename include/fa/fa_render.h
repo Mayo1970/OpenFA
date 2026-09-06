@@ -131,10 +131,10 @@ typedef struct fa_scene {
      * tiles and its band-0 entities, BEFORE its band-2 entities - exactly
      * where the exe fires level[+0x16EB + plane*4] (0x433524). The game
      * installs the player renderer (0x41A780) as the PLANE 2 hook
-     * (0x417150 -> 0x432820(2, ...)), so the kid draws mid-scene and the
+     * (0x417150 -> 0x432820(2, ...)), so the character draws mid-scene and the
      * foreground tile planes 3/4 (jungle spikes, factory pipes) and any
      * plane-2 band-2 entities occlude it. fa_slice uses this to draw the
-     * kid + thrown snowballs at plane 2. NULL = no hook (headless tests). */
+     * character + thrown snowballs at plane 2. NULL = no hook (headless tests). */
     void (*on_plane)(void *ud, const struct fa_surface *dst,
                      const struct fa_camera *cam, int plane);
     void  *on_plane_ud;

@@ -64,15 +64,15 @@ typedef enum fa_snd_event {
     FA_SND_MUSIC_BOSS,     /* endgegner.wav   */
 
     /* voice - channel 17, one-shot */
-    FA_SND_SWAP_P2M,       /* pi0020.wav - penguin -> Fettalatte */
-    FA_SND_SWAP_M2P,       /* ms0013.wav - Fettalatte -> penguin */
+    FA_SND_SWAP_P2M,       /* pi0020.wav - Pinguì -> Milchschnitte */
+    FA_SND_SWAP_M2P,       /* ms0013.wav - Milchschnitte -> Pinguì */
 
     /* SFX - fixed lanes */
     FA_SND_JUMP_P,         /* alsf01.wav lane 0 */
     FA_SND_JUMP_M,         /* alsf01.wav lane 1 */
     FA_SND_THROW_P,        /* alsf07.wav lane 0 */
     FA_SND_THROW_M,        /* alsf07.wav lane 1 */
-    FA_SND_GLIDE,          /* alsf02.wav lane 0 - penguin flight */
+    FA_SND_GLIDE,          /* alsf02.wav lane 0 - Pinguì flight */
     FA_SND_PICKUP,         /* alsf09.wav lane 2 - collectible */
     FA_SND_PUSH,           /* schieben.wav lane 6 */
     FA_SND_ENEMY_DEFEAT,   /* alsf04.wav lane 3 */
@@ -120,15 +120,15 @@ typedef enum fa_snd_event {
     /*
      * Idle voice lines (state-1 handler 0x417BD5 / state-17 handler
      * 0x418DA4). Each idle fidget starts a one-shot on the voice lane
-     * (channel 0x11). Penguin idle A picks A1/A2 with rng()&1; penguin idle B
-     * is the yawn. Fettalatte's idle picks 1/2 with rng()&1. .data strings
+     * (channel 0x11). Pinguì idle A picks A1/A2 with rng()&1; Pinguì idle B
+     * is the yawn. Milchschnitte's idle picks 1/2 with rng()&1. .data strings
      * 0x456BC0 / 0x456BE4 / 0x456C08 / 0x456B54 / 0x456B78.
      */
-    FA_SND_PENGUIN_IDLE_A1,  /* voices/ita/pi0001.wav - penguin idle A (talk) */
-    FA_SND_PENGUIN_IDLE_A2,  /* voices/ita/pi0002.wav - penguin idle A (talk) */
-    FA_SND_PENGUIN_IDLE_B,   /* gaehnen.wav           - penguin idle B (yawn) */
-    FA_SND_MILCH_IDLE_1,     /* voices/ita/ms0001.wav - Fettalatte idle       */
-    FA_SND_MILCH_IDLE_2,     /* voices/ita/ms0002.wav - Fettalatte idle       */
+    FA_SND_PENGUIN_IDLE_A1,  /* voices/ita/pi0001.wav - Pinguì idle A (talk) */
+    FA_SND_PENGUIN_IDLE_A2,  /* voices/ita/pi0002.wav - Pinguì idle A (talk) */
+    FA_SND_PENGUIN_IDLE_B,   /* gaehnen.wav           - Pinguì idle B (yawn) */
+    FA_SND_MILCH_IDLE_1,     /* voices/ita/ms0001.wav - Milchschnitte idle    */
+    FA_SND_MILCH_IDLE_2,     /* voices/ita/ms0002.wav - Milchschnitte idle    */
 
     FA_SND__COUNT
 } fa_snd_event;

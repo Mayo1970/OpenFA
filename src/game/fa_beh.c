@@ -229,11 +229,11 @@ static const char *RB_TAUNT[5] = { "SDat/voices/ita/rb0011.wav",
  * 0x455F6C / 0x455F48 / 0x455F24 / 0x455EB8 / 0x455EDC / 0x455F00 / 0x455E70 /
  * 0x455E94 / 0x455E4C). ob0001 intro; ob0004 a snowball registered; ob0002/3
  * the on-hit taunts (state 101); ob0007 the calm shoot-end line; ob0008/9/13
- * the shoot-end lines when the kid shot back; ob0006 defeat. */
+ * the shoot-end lines when the character shot back; ob0006 defeat. */
 #define OB_INTRO  "SDat/voices/ita/ob0001.wav"
 #define OB_HIT    "SDat/voices/ita/ob0004.wav"
 #define OB_DEFEAT "SDat/voices/ita/ob0006.wav"
-/* shoot-end when the kid did NOT shoot back: rand%2 over ob0007 / ob0013
+/* shoot-end when the character did NOT shoot back: rand%2 over ob0007 / ob0013
  * (exe 0x40D122..0x40D166). */
 static const char *OB_CALM[2] = { "SDat/voices/ita/ob0007.wav",
                                   "SDat/voices/ita/ob0013.wav" };
@@ -302,9 +302,9 @@ static void select_player(fa_beh *b, int ex, int ey)
 
 /* the robot boss aim lane. The exe (0x40D7B7) buckets the player's SCREEN x
  * at 0x120 / 0x240; the port prefers its own read: the lane is
- * the wall button (ObjNr 83) whose frame-box centre Y is nearest the kid's
+ * the wall button (ObjNr 83) whose frame-box centre Y is nearest the character's
  * feet. Buttons are stacked (idx 0 low .. 2 high), so the bolt - through the
- * fixed exe vy table {+10, 0, -8} - tracks the button the kid stands at. */
+ * fixed exe vy table {+10, 0, -8} - tracks the button the character stands at. */
 static int rb_lane(const fa_beh *b)
 {
     int best = 1, bestd = -1;
@@ -475,7 +475,7 @@ static void touch_player(fa_beh *b, int ex0,int ey0,int ex1,int ey1)
 {
     /* A shared-health co-op run still has one target per enemy. Select the
      * closest player whose contact box actually overlaps; exact ties retain
-     * Penguin (slot 0), matching the attack-gate selection. */
+     * Pinguì (slot 0), matching the attack-gate selection. */
     int i = nearest_contact_player(b, ex0, ey0, ex1, ey1);
     if (i < 0) return;
     const fa_beh_player *p = &b->players[i];
@@ -651,13 +651,13 @@ static int beh_block(fa_entity_rec *e, int wrapped, void *ctx)
 }
 
 /* ================================================================
- * Kinder Paradiso  (ObjNr 77, misc_paradiso.w01, DetailGroup 4 - 0x415640)
+ * Paradiso  (ObjNr 77, misc_paradiso.w01, DetailGroup 4 - 0x415640)
  * ================================================================
- * NOT an enemy, never blocks or hurts the kid. The placement's rec[+0x2A]
+ * NOT an enemy, never blocks or hurts the character. The placement's rec[+0x2A]
  * byte selects the behaviour (handler 0x415640, state-1 dispatch 0x415B70):
  *
  *   rec[+0x2A] == 10 : a NORMAL level. The mascot is ROPED. Frames from the
- *     contact sheet: hold frame 5 (bound) -> kid approaches -> frames 6..14
+ *     contact sheet: hold frame 5 (bound) -> character approaches -> frames 6..14
  *     ONCE (breaks free) -> loop frames 0..4 (mouth) for the whole world line
  *     PA00NN.wav -> hold frame 0, latched. World line (ds:0x4DABD4):
  *     1 PA0011, 2 PA0014, 3 PA0013, 4 PA0012.
@@ -761,8 +761,8 @@ static int beh_paradiso(fa_entity_rec *e, int wrapped, void *ctx)
             if (b->px <= x0 - 150 || b->px >= x1 + 150) return 0;
             if (b->py <= y0 - 150 || b->py >= y1 + 250) return 0;
         } else {
-            /* Kinder Paradiso levels: fire only on real contact with the
-             * mascot sprite, not on proximity. `m` = the kid's half-width. */
+            /* Paradiso levels: fire only on real contact with the
+             * mascot sprite, not on proximity. `m` = the character's half-width. */
             const int m = 20;
             if (b->px <= x0 - m || b->px >= x1 + m) return 0;
             if (b->py <= y0 - m || b->py >= y1 + m) return 0;
@@ -836,7 +836,7 @@ static int beh_paradiso(fa_entity_rec *e, int wrapped, void *ctx)
  *
  *   0 IDLE  : solid, holds frame 0 - state-0 init (0x416CD0) zeroes the anim
  *             range so it does NOT cycle its sheet. The common tail walks the
- *             player list; when the kid stands on the deck (X in
+ *             player list; when the character stands on the deck (X in
  *             [rec.X, rec.X + w], feet at rec.Y + rec[0x2A]) and the arm latch
  *             rec[0x70] is 0, it sets rec[0x74] = 0x1E, rec[0x70] = 1,
  *             rec[0x98] = 3.0 (a cosmetic pre-break bob) and rec[0x62] = 1.
@@ -847,12 +847,12 @@ static int beh_paradiso(fa_entity_rec *e, int wrapped, void *ctx)
  *   2 BREAK : when the sheet reaches its last frame (0x416D34): rec[0xB9] = 1
  *             (hide), rec[0x74] = 0x78, rec[0x62] = 3.
  *   3 GONE  : rec[0x74]-- (0x416D66). At 0: rec[0x1A] = 1, rec[0xB9] = 0,
- *             rec[0x62] = 0. rec[0x70] is NOT reset here, so if the kid is
+ *             rec[0x62] = 0. rec[0x70] is NOT reset here, so if the character is
  *             still on the tile at regen it will not re-break until he leaves.
  *
  * The pre-break bob (rec[0x94]/rec[0x98]) is cosmetic and needs a per-record
  * render offset the port entity has no field for - not reproduced (same
- * omission as the Kinder Paradiso wobble). Collision is toggled through
+ * omission as the Paradiso wobble). Collision is toggled through
  * e->is_lift (fa_entity_solid_at / fa_entity_ride gate on it), so only this
  * ObjNr is affected; e->collision_enabled is kept in step for consistency.
  */
@@ -930,7 +930,7 @@ static int beh_broesel(fa_entity_rec *e, int wrapped, void *ctx)
             e->hidden = 0;                /* rec[0xB9] = 0                  */
             e->bs[BS_LS] = BR_IDLE;
             /* BS_AF (rec[0x70]) left set on purpose: no re-break until the
-             * kid steps off and back on (matches 0x416D66). */
+             * character steps off and back on (matches 0x416D66). */
         }
         return 0;
     }
@@ -1019,7 +1019,7 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
             e->bs[BS_RNG] = 300 + brand(b, 240); /* periodic-roar timer       */
             if (e->obj_nr == 10) {           /* gorilla: intro speech first   */
                 e->bs[BS_LS] = 320;
-                e->flip_x = 0;               /* faces left, toward the kid    */
+                e->flip_x = 0;               /* faces left, toward the character    */
                 pd_range(e, 47, 51, 1);      /* speech gesture (exe 0x40C921) */
                 if (b->h.voice) b->h.voice(GB_INTRO, b->h.user);
             } else if (e->obj_nr == 9) {     /* yeti: intro babble first      */
@@ -1317,7 +1317,7 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
          *                           speech -> 320 (exe -> state 50)
          *   310 defeated <- 110   : KO 64..71, held. --- */
         if (e->obj_nr == 10) {
-            e->flip_x = 0;                    /* always faces the kid (left)  */
+            e->flip_x = 0;                    /* always faces the character (left)  */
             switch (e->bs[BS_LS]) {
             case 310:                        /* defeated: hold the KO frame  */
                 e->frame = e->anim_last;
@@ -1563,9 +1563,9 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
 
         /* --- robot (Welt3E, ObjNr 14): stationary; fires bolts (ROBOTER.W01
          * frame 188) in one of 3 lanes (rb_lane: the wall button nearest the
-         * kid; the exe buckets screen-x thirds - this read is preferred).
+         * character; the exe buckets screen-x thirds - this read is preferred).
          * NEVER hurt by a snowball - every exe state calls 0x41A5E0(box,
-         * flag 2) = bounce. Damage: the kid pushes the 3 buttons (ObjNr 83)
+         * flag 2) = bounce. Damage: the character pushes the 3 buttons (ObjNr 83)
          * on the left of the arena; all 3 down -> the pipe (ObjNr 85) drops
          * onto the robot -> 1 hit, then the buttons reset (see beh_button /
          * beh_pipe; the hit is raised there via boss state 300).
@@ -1663,7 +1663,7 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
                     }
                 } else if (e->bs[BS_RNG] == 1) {   /* loop f0+5..f0+12 + fire   */
                     int nl = rb_lane(b);
-                    if (nl != lane) {              /* kid moved -> re-aim pose  */
+                    if (nl != lane) {              /* character moved -> re-aim pose  */
                         e->bs[BS_KT] = lane = nl;
                         f0 = 88 + lane * 17;
                         pd_range(e, f0 + 5, f0 + 12, 0);
@@ -2056,7 +2056,7 @@ static int beh_i7(fa_entity_rec *e, int wrapped, void *ctx)
 /*
  * The floor ice block (ObjNr 265 "Eis_klotz", exe 0x4149F0). It sits on the
  * ground by the yeti; when the yeti kicks (b->ib_phase 1 -> 2) it slides left
- * across the floor toward the kid at 10 px/tick, 20 contact damage, until it
+ * across the floor toward the character at 10 px/tick, 20 contact damage, until it
  * is off the left edge (b->ib_phase -> 3); the yeti's next HOP-landing rearms
  * it (b->ib_phase -> 0) - it drops back in from its placed position and, once
  * it hits the floor again, is ready for the next kick (exe state 4 -> state 1).
@@ -2247,7 +2247,7 @@ static int beh_abbruch(fa_entity_rec *e, int wrapped, void *ctx)
  * the World-3 (FABBRICA) robot-boss arena mechanism.
  * ================================================================
  * 3 buttons (ObjNr 83, rec[0x2A] = index 0/1/2) sit on the left of the
- * arena, frozen on frame 0 until the kid walks into one. A press plays the
+ * arena, frozen on frame 0 until the character walks into one. A press plays the
  * button anim + w3sf03 and latches b->rb_btn[index]. ObjNr 84 (also 3, same
  * index) is a reactor that just animates while its button is down. When all
  * 3 are latched the pipe (ObjNr 85) drops from its placed position straight
@@ -2408,7 +2408,7 @@ fa_beh *fa_beh_create(fa_entity_store *store, const fa_beh_hooks *hooks)
         fa_entity_set_behaviour(store, DESC[i].obj_nr, beh_enemy, b);
     for (unsigned i = 0; i < sizeof BLOCK_OBJ / sizeof BLOCK_OBJ[0]; i++)
         fa_entity_set_behaviour(store, BLOCK_OBJ[i], beh_block, b);
-    fa_entity_set_behaviour(store, 77, beh_paradiso, b);   /* Kinder Paradiso */
+    fa_entity_set_behaviour(store, 77, beh_paradiso, b);   /* Paradiso */
     fa_entity_set_behaviour(store, 414, beh_broesel, b);   /* crumbling platform */
     fa_entity_set_behaviour(store, 59, beh_i7, b);         /* boss-arena i7    */
     fa_entity_set_behaviour(store, 265, beh_iceblock, b);  /* yeti kick        */

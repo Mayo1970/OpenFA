@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(fresh_adventures C)
+project(openfa C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -10,12 +10,19 @@ else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+if (NOT WIN32)
+  # clock_gettime / strcasecmp / mkdir / dirent need the POSIX declarations,
+  # which a strict C standard mode hides on glibc.
+  add_compile_definitions(_POSIX_C_SOURCE=200809L)
+endif()
+
 # --- engine core: zero external dependencies -------------------------------
 # The core links no external library. The SDL2 desktop backend (RRR-41) is
 # the one optional exception and it is isolated in its own translation unit:
 # without SDL2 the file compiles to stubs and the null backend is used.
 add_library(fa_core STATIC
   src/core/fa_loop.c
+  src/core/fa_fs.c
   src/core/fa_surface.c
   src/core/fa_script.c
   src/core/fa_aom.c
@@ -72,9 +79,9 @@ if (FA_WITH_SDL2)
       target_include_directories(fa_core PRIVATE ${SDL2_INCLUDE_DIRS})
       target_link_libraries(fa_core PUBLIC ${SDL2_LIBRARIES})
     endif()
-    message(STATUS "Fresh Adventures: SDL2 desktop backend enabled")
+    message(STATUS "OpenFA: SDL2 desktop backend enabled")
   else()
-    message(STATUS "Fresh Adventures: SDL2 not found - null backend only")
+    message(STATUS "OpenFA: SDL2 not found - null backend only")
   endif()
 endif()
 
@@ -84,6 +91,13 @@ target_link_libraries(sim_replay PRIVATE fa_core)
 
 add_executable(fa_slice tools/fa_slice.c)
 target_link_libraries(fa_slice PRIVATE fa_core)
+if (WIN32)
+  # GUI subsystem: no console ("prompts") window opens next to the game
+  set_target_properties(fa_slice PROPERTIES WIN32_EXECUTABLE TRUE)
+  if (MSVC)
+    target_link_options(fa_slice PRIVATE /ENTRY:mainCRTStartup)
+  endif()
+endif()
 
 add_executable(map_probe tools/map_probe.c)
 target_link_libraries(map_probe PRIVATE fa_core)
@@ -125,6 +139,10 @@ add_test(NAME res COMMAND test_res)
 add_executable(test_vfs tests/test_vfs.c)
 target_link_libraries(test_vfs PRIVATE fa_core)
 add_test(NAME vfs COMMAND test_vfs)
+
+add_executable(test_fs tests/test_fs.c)
+target_link_libraries(test_fs PRIVATE fa_core)
+add_test(NAME fs COMMAND test_fs)
 
 add_executable(test_input tests/test_input.c)
 target_link_libraries(test_input PRIVATE fa_core)

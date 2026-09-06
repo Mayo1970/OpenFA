@@ -14,11 +14,14 @@ case "$(uname -s)" in
     TIMELIB="-lwinmm";  MATHLIB="" ;;
   *)
     PLAT=src/platform/fa_time_posix.c;  PATHS=src/platform/fa_paths_posix.c
-    TIMELIB="";  MATHLIB="-lm" ;;
+    TIMELIB="";  MATHLIB="-lm"
+    # strict -std=c11 hides clock_gettime / strcasecmp / dirent on glibc
+    CFLAGS="$CFLAGS -D_POSIX_C_SOURCE=200809L" ;;
 esac
 
 CORE="src/core/fa_loop.c $PLAT"
 STORAGE="src/core/fa_vfs.c $PATHS"
+FS="src/core/fa_fs.c"
 AUDIO="src/core/fa_audio.c src/core/fa_wav.c"
 
 echo "== stage 1: capture the golden hash =="
@@ -39,15 +42,17 @@ echo "== stage 3: blitter + script + aom + resource tests (RRR-35..38) =="
 # shellcheck disable=SC2086
 $CC $CFLAGS tests/test_surface.c src/core/fa_surface.c -o "$OUT/test_surface"
 # shellcheck disable=SC2086
-$CC $CFLAGS tests/test_script.c  src/core/fa_script.c  -o "$OUT/test_script"
+$CC $CFLAGS tests/test_script.c  src/core/fa_script.c $FS -o "$OUT/test_script"
 # shellcheck disable=SC2086
-$CC $CFLAGS tests/test_aom.c     src/core/fa_aom.c     -o "$OUT/test_aom"
+$CC $CFLAGS tests/test_aom.c     src/core/fa_aom.c    $FS -o "$OUT/test_aom"
 # shellcheck disable=SC2086
 $CC $CFLAGS tests/test_res.c     src/core/fa_res.c     -o "$OUT/test_res"
 # shellcheck disable=SC2086
 $CC $CFLAGS tests/test_rng.c     src/core/fa_rng.c     -o "$OUT/test_rng"
 
 echo "== stage 4: storage + input tests (RRR-39, RRR-40) =="
+# shellcheck disable=SC2086
+$CC $CFLAGS tests/test_fs.c    $FS -o "$OUT/test_fs"
 # shellcheck disable=SC2086
 $CC $CFLAGS tests/test_vfs.c   $STORAGE -o "$OUT/test_vfs"
 # shellcheck disable=SC2086
@@ -60,7 +65,7 @@ MAPSRC="src/core/fa_w01.c src/core/fa_w02.c src/core/fa_map.c src/core/fa_render
 src/core/fa_entity.c src/core/fa_aom.c src/core/fa_bmp.c src/core/fa_menu.c \
 src/core/fa_hiscore.c src/core/fa_options.c src/core/fa_save.c src/core/fa_rng.c \
 src/game/fa_player.c src/game/fa_charspr.c src/game/fa_collide.c src/game/fa_beh.c \
-src/game/fa_hud.c src/game/fa_death.c src/game/fa_credits.c $STORAGE"
+src/game/fa_hud.c src/game/fa_death.c src/game/fa_credits.c $FS $STORAGE"
 PLATFORM_SRC="src/platform/fa_backend_null.c src/platform/fa_backend_sdl2.c \
 src/platform/fa_platform.c src/app/fa_app.c src/core/fa_surface.c \
 src/core/fa_input.c $AUDIO $MAPSRC $CORE"
@@ -76,7 +81,7 @@ $CC $CFLAGS tests/test_map.c $MAPSRC src/core/fa_surface.c -o "$OUT/test_map"
 # shellcheck disable=SC2086
 $CC $CFLAGS tests/test_entity.c $MAPSRC src/core/fa_surface.c -o "$OUT/test_entity"
 # shellcheck disable=SC2086
-$CC $CFLAGS tools/map_probe.c src/core/fa_w02.c src/core/fa_map.c -o "$OUT/map_probe"
+$CC $CFLAGS tools/map_probe.c src/core/fa_w02.c src/core/fa_map.c $FS -o "$OUT/map_probe"
 
 echo "== stage 7: player controller + collision (RRR-43 / RRR-44) =="
 # shellcheck disable=SC2086
@@ -90,12 +95,12 @@ $CC $CFLAGS tests/test_death.c src/game/fa_death.c -o "$OUT/test_death"
 $CC $CFLAGS tests/test_collide.c src/game/fa_collide.c -o "$OUT/test_collide"
 # shellcheck disable=SC2086
 $CC $CFLAGS tests/test_charspr.c src/game/fa_charspr.c src/core/fa_w01.c \
-  src/core/fa_surface.c -o "$OUT/test_charspr"
+  src/core/fa_surface.c $FS -o "$OUT/test_charspr"
 
 echo "== stage 8: menu + high-score + options + save (RRR-47) =="
 MENUSRC="src/core/fa_menu.c src/core/fa_hiscore.c src/core/fa_options.c \
 src/core/fa_save.c src/core/fa_bmp.c src/core/fa_w01.c src/core/fa_surface.c \
-$STORAGE"
+$FS $STORAGE"
 # shellcheck disable=SC2086
 $CC $CFLAGS tests/test_menu.c $MENUSRC -o "$OUT/test_menu"
 # shellcheck disable=SC2086
@@ -106,17 +111,18 @@ $CC $CFLAGS tests/test_save.c src/core/fa_save.c src/core/fa_options.c \
 # RRR-54: credits sequence
 # shellcheck disable=SC2086
 $CC $CFLAGS tests/test_credits.c src/game/fa_credits.c src/core/fa_bmp.c \
-  src/core/fa_w01.c src/core/fa_surface.c -o "$OUT/test_credits"
+  src/core/fa_w01.c src/core/fa_surface.c $FS -o "$OUT/test_credits"
 
 echo "== stage 9: audio mixer + WAV reader (RRR-46) =="
 # shellcheck disable=SC2086
-$CC $CFLAGS tests/test_audio.c $AUDIO $MATHLIB -o "$OUT/test_audio"
+$CC $CFLAGS tests/test_audio.c $AUDIO $FS $MATHLIB -o "$OUT/test_audio"
 
 echo "== run tests =="
 "$OUT/test_loop"
 "$OUT/test_surface"
 "$OUT/test_res"
 "$OUT/test_rng"
+"$OUT/test_fs"
 "$OUT/test_vfs"
 "$OUT/test_input"
 "$OUT/test_platform"

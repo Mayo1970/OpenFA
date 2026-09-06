@@ -47,8 +47,8 @@
  *       0x02  ONE-WAY PLATFORM, top row only. The tile collision builder
  *             fcn.00434240 tests code & 2 at 0x4343C4; when set it yields a
  *             solid result only where the tile-local Y remainder is 0
- *             (0x4343CB). The climb head probe passes code & 3, so the kid
- *             climbs straight up through one of these.
+ *             (0x4343CB). The climb head probe passes code & 3, so the
+ *             character climbs straight up through one of these.
  *       0x04  unknown. No caller ever masks 0x04 against fcn.00434200. Do
  *             NOT infer it from the &0x7 / &0x5 masks in fcn.00431DB0 - those
  *             apply to the DERIVED byte fcn.00434240 builds, not to this code.

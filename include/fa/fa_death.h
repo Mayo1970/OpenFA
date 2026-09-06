@@ -1,7 +1,7 @@
 /*
- * fa_death.h - what happens when the kid's health hits 0
+ * fa_death.h - what happens when the character's health hits 0
  *
- * The kid has ONE survival meter: health (0x45F014). There is no lives
+ * The character has ONE survival meter: health (0x45F014). There is no lives
  * counter. When health reaches 0 the run is OVER:
  *
  *   1. the player is locked into the KO animation for 240 ticks (4.0 s at
@@ -19,7 +19,7 @@
  * Reverse-engineered by hand off jr_disasm.txt + the exe .rdata:
  *   - trigger: player update fcn.00417370 @ 0x417419 - health <= 0 and the
  *     death countdown 0x4E0B44 == -1 -> 0x4E0B44 = 0xF0 (240), sub-timer
- *     0x4E102C = 0x1E (30), player anim state 0x4E1028 = 0x22 (penguin) or
+ *     0x4E102C = 0x1E (30), player anim state 0x4E1028 = 0x22 (Pinguì) or
  *     0x24 (Milchschnitte) - selected by 0x4E1020, the ACTIVE CHARACTER index
  *     (0/1; set at player init @0x417294 and on a completed swap @0x417DCF).
  *     Camera mode 0x4DABA8 = 1 (the level-intro pan). Each tick 0x4E0B44--;
@@ -71,7 +71,7 @@ typedef enum {
 typedef struct fa_death {
     fa_death_phase phase;
     int      tick;           /* ticks since fa_death_begin (0 while ALIVE)     */
-    int      character;      /* 0 penguin (frames 150..162) / 1 Milch (36..48) */
+    int      character;      /* 0 Pinguì (frames 150..162) / 1 Milchschnitte (36..48) */
     int      facing;         /* -1 / +1 latched at death                       */
     int      over;           /* 1 for exactly the tick the run ends (-> fade)  */
     int      fade;           /* FADE phase: FA_DEATH_FADE_TICKS -> 0           */
@@ -81,7 +81,7 @@ typedef struct fa_death {
 /* Reset to ALIVE. Call on every level (re)load and when the run ends. */
 void fa_death_init(fa_death *d);
 
-/* Enter the death sequence. `character` (0 penguin / 1 Milchschnitte) picks
+/* Enter the death sequence. `character` (0 Pinguì / 1 Milchschnitte) picks
  * the KO clip; `facing` is -1 or +1. No-op if already dying. */
 void fa_death_begin(fa_death *d, int character, int facing);
 

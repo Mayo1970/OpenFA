@@ -16,8 +16,8 @@
  * All from JR_FERRERO.exe except `gravity` (estimate). */
 const fa_player_tuning FA_PLAYER_DEFAULT_TUNING = {
     /* gravity          */ (FA_FIX(6)) / 10,   /* 0.6 px/tick^2  (shared world const, float @0x452254) */
-    /* jump_vel         */ -(FA_FIX(11)),      /* penguin: -11.0 px/tick (exe 0xB000)    */
-    /* jump_vel_c1      */ -(FA_FIX(9)),       /* Fettalatte: lower jump (tuned)         */
+    /* jump_vel         */ -(FA_FIX(11)),      /* Pinguì: -11.0 px/tick (exe 0xB000)    */
+    /* jump_vel_c1      */ -(FA_FIX(9)),       /* Milchschnitte: lower jump (tuned)         */
     /* jump_hold_gravity*/ (FA_FIX(2)) / 10,   /* 0.2 px/tick^2 while JUMP held + rising */
     /* jump_hold_ticks  */ 10,                 /* exe [0x4e10b0] init 10 in state 4   */
     /* run_speed      */ FA_FIX(5),            /* +/-5.0 px/tick, set directly (exe 0x5000) */
@@ -26,7 +26,7 @@ const fa_player_tuning FA_PLAYER_DEFAULT_TUNING = {
     /* air_max        */ FA_FIX(5),            /* air horizontal clamp               */
     /* crouch_max     */ FA_FIX(1),
     /* floor_y        */ FA_FIX(480),
-    /* glide_max_vy   */ (FA_FIX(15)) / 10,    /* 1.5 px/tick slow sink (penguin) */
+    /* glide_max_vy   */ (FA_FIX(15)) / 10,    /* 1.5 px/tick slow sink (Pinguì) */
 
     /* climb_speed    */ FA_FIX(3),            /* 3 px/tick on a ladder             */
     /* climb_jump_vx  */ FA_FIX(5),            /* 0x5000 hop-off                     */
@@ -39,10 +39,10 @@ const fa_player_tuning FA_PLAYER_DEFAULT_TUNING = {
     /* push_obj_vx    */ FA_FIX(7),            /* 0x40e00000 shove speed            */
 
     /* throw_cooldown */ 4,                    /* small gap after the throw lock ends */
-    /* throw_ticks    */ 54,                   /* penguin: (260-233)*2               */
-    /* throw_ticks_c1 */ 46,                   /* Fettalatte: (296-273)*2            */
-    /* throw_release  */ 44,                   /* penguin: frame 255 = (255-233)*2   */
-    /* throw_release_c1*/ 36,                  /* Fettalatte: frame 291 = (291-273)*2 */
+    /* throw_ticks    */ 54,                   /* Pinguì: (260-233)*2               */
+    /* throw_ticks_c1 */ 46,                   /* Milchschnitte: (296-273)*2            */
+    /* throw_release  */ 44,                   /* Pinguì: frame 255 = (255-233)*2   */
+    /* throw_release_c1*/ 36,                  /* Milchschnitte: frame 291 = (291-273)*2 */
     /* snow_vx      */ FA_FIX(16),             /* forward throw (0x41800000)          */
     /* snow_vy      */ -(FA_FIX(23)) / 2,      /* -11.5 (exe -11 or -12, randomised)  */
     /* snow_vx_up   */ FA_FIX(9),              /* up throw (Up held + Fire)           */
@@ -127,7 +127,7 @@ static int feet_blocked(const fa_player *p)
  * above them, or INT32_MAX if none. Searching bottom-up returns the lowest
  * rest spot, so a floor is caught as soon as the rising feet reach its top -
  * and a floor that ends up around the body (a rope hung from an upper deck)
- * lifts the kid onto it. Reuses the tested fa_collide ground test. */
+ * lifts the character onto it. Reuses the tested fa_collide ground test. */
 static int32_t climb_ledge_y(const fa_player *p, int up, int down)
 {
     if (!p->solid_fn) return INT32_MAX;
@@ -168,7 +168,7 @@ static int ladder_at(fa_player *p, int px, int py)
  * exe fcn.0041a830 (IsLadderAtOrNear): the climb grab has a long
  * UPWARD reach - the original probes the feet, feet-10 and feet-160, so a
  * vine that hangs up to ~160 px overhead can still be grabbed from the
- * ground (the kid then climbs up through the air to reach it). We scan the
+ * ground (the character then climbs up through the air to reach it). We scan the
  * whole column so a vine anywhere in that band counts.
  */
 #define FA_CLIMB_REACH 160
@@ -276,7 +276,7 @@ void fa_player_tick(fa_player *p, uint32_t in)
     int fire_edge   = fire && !p->fire_held_prev;
     int jump_raw    = jump;
 
-    /* ---- SWAP: all input locked; toggle the kid when it ends ---- */
+    /* ---- SWAP: all input locked; toggle the character when it ends ---- */
     if (p->swap_timer > 0) {
         p->vx = p->vy = 0;
         if (--p->swap_timer == 0) {
@@ -292,7 +292,7 @@ void fa_player_tick(fa_player *p, uint32_t in)
 
     /* ---- CLIMB (exe state 13 fcn.004186dc): no gravity while on a
      * vine. UP climbs toward a vine anywhere within FA_CLIMB_REACH overhead
-     * (the kid rises through the air to grab it) and stops at its top; DOWN
+     * (the character rises through the air to grab it) and stops at its top; DOWN
      * descends while a vine covers the feet, then steps onto the ground. ---- */
     if (p->state == FA_PST_CLIMB) {
         int px = fa_player_px(p);
@@ -315,7 +315,7 @@ void fa_player_tick(fa_player *p, uint32_t in)
         }
 
         /* Dismount assist - a deliberate deviation from the exe. The original
-         * stops the feet at the vine's top pixel and leaves the kid hanging
+         * stops the feet at the vine's top pixel and leaves the character hanging
          * there (verified twice: 0x4186dc has no ledge search and exactly one
          * position write at 0x4188ef). We add a pull-up onto the deck, but we
          * arm it only where the vine actually ran out, and we glide instead of
@@ -382,8 +382,8 @@ void fa_player_tick(fa_player *p, uint32_t in)
 
         /* Arm the assist only where the vine ran out under a reachable deck.
          * Resting on a vine, or passing a deck mid-climb, no longer moves the
-         * kid - that was the source of the yank. A vine that ends in open air
-         * (Welt1 x=68 / 99 / 199) finds no ledge and still leaves the kid
+         * character - that was the source of the yank. A vine that ends in open air
+         * (Welt1 x=68 / 99 / 199) finds no ledge and still leaves the character
          * hanging at the top, exactly as the exe does. */
         if (!on_floor && vine_ran_out && p->solid_fn) {
             int32_t ly = climb_ledge_y(p, t->body_h, -4);
@@ -412,7 +412,7 @@ void fa_player_tick(fa_player *p, uint32_t in)
         return;
     }
 
-    /* ---- PUSH (Fettalatte only): state 33 is a COMMITTED clip
+    /* ---- PUSH (Milchschnitte only): state 33 is a COMMITTED clip
      * (MILCHSCHNITTE 172..190, ~38 ticks). The exe does NOT test the
      * direction input during the clip - releasing LEFT/RIGHT does not abort
      * it. It exits early only on loss of grounding or the kind-5 probe
@@ -472,7 +472,7 @@ void fa_player_tick(fa_player *p, uint32_t in)
         return;
     }
 
-    /* ---- PUSH entry: Fettalatte in WALK, on the ground, facing
+    /* ---- PUSH entry: Milchschnitte in WALK, on the ground, facing
      * exactly LEFT or RIGHT and holding that same direction, with an active
      * flag-2 pushable box at (body_x +/- 32, body_y - 100). The exe has NO
      * player-velocity requirement. ---- */
@@ -531,8 +531,8 @@ void fa_player_tick(fa_player *p, uint32_t in)
         if (p->vy > FA_FIX(20)) p->vy = FA_FIX(20);   /* terminal */
     }
 
-    /* penguin glide: past the apex, JUMP + a direction caps the descent so
-     * the penguin sinks slowly and drifts far. No lift. Character 1 cannot. */
+    /* Pinguì glide: past the apex, JUMP + a direction caps the descent so
+     * the Pinguì sinks slowly and drifts far. No lift. Character 1 cannot. */
     p->gliding = (!p->on_ground && p->character == 0 && jump && dir != 0 &&
                   p->vy > 0);
     if (p->gliding && p->vy > t->glide_max_vy)
@@ -598,12 +598,12 @@ void fa_player_tick(fa_player *p, uint32_t in)
     /*
      * idle: only while standing
      * still. idle_timer counts down; at 0 roll rng%3 -> 0 nothing / 1 idle A
-     * / 2 idle B. Penguin idle A and Fettalatte's idle each start a voice
+     * / 2 idle B. Pinguì idle A and Milchschnitte's idle each start a voice
      * line (state 1 / state 17, channel 17); the exe holds the clip until
      * that line ends, so idle_play here is sized to the shipped .wav length
-     * at 60 Hz. Penguin idle B (the yawn) is NOT voice-gated - it just runs
-     * its 91..115 range once. In a boss arena (0x4DABD4 >= 4) the penguin is
-     * forced to idle B with no RNG draw and Fettalatte does not idle at all.
+     * at 60 Hz. Pinguì idle B (the yawn) is NOT voice-gated - it just runs
+     * its 91..115 range once. In a boss arena (0x4DABD4 >= 4) the Pinguì is
+     * forced to idle B with no RNG draw and Milchschnitte does not idle at all.
      *
      * The voice line is fired by the caller (fa_slice) on the idle_kind
      * rising edge, reading idle_kind + idle_sound; audio is not a sim input.
@@ -617,7 +617,7 @@ void fa_player_tick(fa_player *p, uint32_t in)
             p->idle_timer = t->idle_repeat;
             p->idle_sound = 0;
             if (p->in_boss) {
-                /* boss arena: penguin -> forced yawn; Fettalatte -> nothing */
+                /* boss arena: Pinguì -> forced yawn; Milchschnitte -> nothing */
                 if (p->character) {
                     p->idle_kind = 0;
                 } else {
@@ -627,15 +627,15 @@ void fa_player_tick(fa_player *p, uint32_t in)
                 unsigned r = prng(p) % 3u;
                 if (r == 0) {
                     p->idle_kind = 0;
-                } else if (p->character) {           /* Fettalatte: 137..159 */
+                } else if (p->character) {           /* Milchschnitte: 137..159 */
                     p->idle_sound = (int)(prng(p) & 1u);
                     p->idle_kind = 2;
                     p->idle_play = p->idle_sound ? 288 : 311;  /* ms0002/ms0001 */
-                } else if (r == 1) {                 /* penguin idle A: 65..69 */
+                } else if (r == 1) {                 /* Pinguì idle A: 65..69 */
                     p->idle_sound = (int)(prng(p) & 1u);
                     p->idle_kind = 1;
                     p->idle_play = p->idle_sound ? 437 : 325;  /* pi0002/pi0001 */
-                } else {                             /* penguin idle B: 91..115 */
+                } else {                             /* Pinguì idle B: 91..115 */
                     p->idle_kind = 2; p->idle_play = 50;
                 }
             }

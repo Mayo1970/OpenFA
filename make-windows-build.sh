@@ -26,7 +26,7 @@ CFLAGS="-std=c11 -O2 -Wall -Wextra -Iinclude -I$SDL_ROOT/include \
 
 SRC="
 tools/fa_slice.c
-src/core/fa_loop.c src/core/fa_surface.c src/core/fa_script.c src/core/fa_aom.c
+src/core/fa_loop.c src/core/fa_fs.c src/core/fa_surface.c src/core/fa_script.c src/core/fa_aom.c
 src/core/fa_res.c src/core/fa_vfs.c src/core/fa_input.c
 src/core/fa_w01.c src/core/fa_w02.c src/core/fa_map.c src/core/fa_render.c
 src/core/fa_entity.c src/core/fa_bmp.c src/core/fa_menu.c
@@ -41,7 +41,10 @@ src/platform/fa_time_win32.c src/platform/fa_paths_win32.c
 
 echo "== compiling + linking fa_slice.exe (SDL2 $(basename "$SDL_ROOT")) =="
 # shellcheck disable=SC2086
-$CC $CFLAGS $SRC "$SDL_LIB/SDL2.lib" -lwinmm -o "$OUT/fa_slice.exe"
+# /subsystem:windows keeps Windows from opening a console ("prompts") window
+# next to the game. main() stays the entry point via mainCRTStartup.
+$CC $CFLAGS $SRC "$SDL_LIB/SDL2.lib" -lwinmm \
+  -Wl,/subsystem:windows -Wl,/entry:mainCRTStartup -o "$OUT/fa_slice.exe"
 
 cp "$SDL_LIB/SDL2.dll" "$OUT/"
 cp dist-README.txt "$OUT/README.txt" 2>/dev/null || true

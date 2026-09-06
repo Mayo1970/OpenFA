@@ -3,6 +3,7 @@
  * See include/fa/fa_aom.h for the model.
  */
 #include "fa/fa_aom.h"
+#include "fa/fa_fs.h"
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -322,7 +323,7 @@ int fa_aom_parse_file(fa_aom_def *def, const char *path,
 {
     if (diag && diag_cap)
         diag[0] = '\0';
-    FILE *f = fopen(path, "rb");
+    FILE *f = fa_fs_fopen(path, "rb");
     if (!f) {
         diag_add(diag, diag_cap, "cannot open %s", path ? path : "(null)");
         return -1;

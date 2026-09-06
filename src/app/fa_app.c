@@ -67,7 +67,7 @@ static uint32_t pad_buttons_of_slot(const fa_input *in, int slot, int pressed)
 }
 
 /* A second keyboard layout is deliberately separate from the original
- * arrows + A/S/F/D bindings used by the Penguin. */
+ * arrows + A/S/F/D bindings used by Pinguì. */
 static uint32_t keyboard2_actions_of(const fa_input *in)
 {
     uint32_t m = 0;

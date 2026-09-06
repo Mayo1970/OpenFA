@@ -2,6 +2,7 @@
  * fa_w02.c - .W02 pool container. See fa_w02.h.
  */
 #include "fa/fa_w02.h"
+#include "fa/fa_fs.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -68,7 +69,7 @@ int fa_w02_open(fa_w02 *o, const void *data, size_t len, int copy)
 
 int fa_w02_open_file(fa_w02 *o, const char *path)
 {
-    FILE *f = fopen(path, "rb");
+    FILE *f = fa_fs_fopen(path, "rb");
     if (!f) return -1;
     fseek(f, 0, SEEK_END);
     long n = ftell(f);

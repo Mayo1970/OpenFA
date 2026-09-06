@@ -59,7 +59,19 @@ typedef struct {
     int             want_quit;
     Uint64          pf_freq;
     int             integer_scale;
+    int             fullscreen;     /* virtual (desktop) fullscreen state */
 } sdl_state;
+
+/* Toggle borderless desktop fullscreen. Bound to a left double-click and to
+ * Alt+Enter; the Alt+Enter path is consumed before the RETURN key reaches the
+ * input layer so it never also triggers the co-op join. */
+static void sdl_toggle_fullscreen(sdl_state *s)
+{
+    if (!s->win) return;
+    s->fullscreen = !s->fullscreen;
+    SDL_SetWindowFullscreen(s->win,
+        s->fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+}
 
 static int pad_button_to_fa(SDL_GameControllerButton b)
 {
@@ -119,7 +131,7 @@ static int sdl_open_controller(sdl_state *s, int device_index, int slot)
     /* A controller that was already present during startup can still produce
      * a queued DEVICEADDED event on some SDL/platform combinations.  Do not
      * let that event open the same physical joystick in the other local-pad
-     * slot: co-op uses the slot identity to split Penguin and Milchschnitte,
+     * slot: co-op uses the slot identity to split Pinguì and Milchschnitte,
      * so a duplicate would make one controller drive both players. */
     for (int i = 0; i < FA_INPUT_MAX_PADS; i++) {
         if (i != slot && s->pads[i] && s->pad_ids[i] == id) {
@@ -267,7 +279,15 @@ static int sdl_pump(fa_platform *p, struct fa_input *in)
         case SDL_KEYDOWN:
         case SDL_KEYUP: {
             if (e.key.repeat) break;
-            int dik = sc_to_dik(e.key.keysym.scancode);
+            SDL_Scancode scn = e.key.keysym.scancode;
+            int is_enter = (scn == SDL_SCANCODE_RETURN ||
+                            scn == SDL_SCANCODE_KP_ENTER);
+            if (e.type == SDL_KEYDOWN && is_enter &&
+                (e.key.keysym.mod & KMOD_ALT)) {
+                sdl_toggle_fullscreen(s);
+                break;   /* consume: RETURN must not reach the co-op join */
+            }
+            int dik = sc_to_dik(scn);
             if (dik && in)
                 fa_input_set_key(in, dik, e.type == SDL_KEYDOWN);
             if (e.type == SDL_KEYDOWN &&
@@ -280,6 +300,11 @@ static int sdl_pump(fa_platform *p, struct fa_input *in)
             break;
         case SDL_MOUSEBUTTONDOWN:
         case SDL_MOUSEBUTTONUP: {
+            if (e.type == SDL_MOUSEBUTTONDOWN &&
+                e.button.button == SDL_BUTTON_LEFT && e.button.clicks == 2) {
+                sdl_toggle_fullscreen(s);
+                break;   /* swallow the 2nd press so it is not a menu click */
+            }
             int b = e.button.button == SDL_BUTTON_LEFT   ? 0 :
                     e.button.button == SDL_BUTTON_RIGHT  ? 1 :
                     e.button.button == SDL_BUTTON_MIDDLE ? 2 : -1;
@@ -429,6 +454,7 @@ int fa_backend_sdl2_create(fa_platform *p, const fa_platform_cfg *cfg)
                               SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                               w * ws, h * ws, wflags);
     if (!s->win) goto fail;
+    s->fullscreen = (cfg && cfg->fullscreen) ? 1 : 0;
 
     /* No SDL_RENDERER_PRESENTVSYNC: the fixed-timestep loop owns cadence
      * and timing must not depend on the refresh. */
