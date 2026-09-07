@@ -5,8 +5,8 @@
 #
 #   ./make-appimage.sh [ICON]
 #
-# ICON is an .ico or .png for the launcher (default: ../master/gesamt.ico, the
-# original game icon, else a plain placeholder). Needs: a C compiler,
+# ICON is an .ico or .png for the launcher (default: src/icon/icon.png, else a
+# plain placeholder). Needs: a C compiler,
 # pkg-config, SDL2 dev files, wget, and ImageMagick ("convert").
 #
 # RUN THIS ON THE OLDEST GLIBC YOU WANT TO SUPPORT. The AppImage runs on that
@@ -15,7 +15,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-ICON_SRC="${1:-../master/gesamt.ico}"
+ICON_SRC="${1:-src/icon/icon.png}"
 OUT=dist
 APPDIR=AppDir
 NAME=OpenFA-x86_64.AppImage
@@ -78,9 +78,24 @@ Categories=Game;
 Terminal=false
 D
 
-if [ -f "$ICON_SRC" ]; then
-    convert "${ICON_SRC}[0]" -resize 256x256 -background none -gravity center \
-        -extent 256x256 "$APPDIR/openfa.png"
+# Prefer the pre-rendered hicolor set from src/icon; else derive from ICON_SRC;
+# else a placeholder. appimagetool reads usr/share/icons/hicolor and the
+# top-level openfa.png (used as .DirIcon).
+if [ -f src/icon/icon_256.png ]; then
+    for s in 16 24 32 48 64 128 256 512; do
+        [ -f "src/icon/icon_${s}.png" ] || continue
+        install -Dm644 "src/icon/icon_${s}.png" \
+            "$APPDIR/usr/share/icons/hicolor/${s}x${s}/apps/openfa.png"
+    done
+    cp src/icon/icon_256.png "$APPDIR/openfa.png"
+elif [ -f "$ICON_SRC" ]; then
+    for s in 16 24 32 48 64 128 256; do
+        d="$APPDIR/usr/share/icons/hicolor/${s}x${s}/apps"
+        mkdir -p "$d"
+        convert "${ICON_SRC}[0]" -resize ${s}x${s} -background none \
+            -gravity center -extent ${s}x${s} "$d/openfa.png"
+    done
+    cp "$APPDIR/usr/share/icons/hicolor/256x256/apps/openfa.png" "$APPDIR/openfa.png"
 else
     echo "   (no icon at $ICON_SRC - using a placeholder)"
     convert -size 256x256 xc:'#c8102e' -gravity center -pointsize 40 \

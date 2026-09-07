@@ -39,11 +39,23 @@ src/platform/fa_backend_sdl2.c src/app/fa_app.c
 src/platform/fa_time_win32.c src/platform/fa_paths_win32.c
 "
 
+echo "== compiling the Windows icon resource =="
+RCOBJ="$OUT/fa_win32.res"
+# llvm-rc ships with clang; fall back to windres (devkitPro / MinGW).
+# llvm-rc parses an MSYS "/abs/path" as an option, so run it from the .rc
+# folder with bare names and move the result.
+if command -v llvm-rc >/dev/null; then
+  ( cd src/platform && llvm-rc fa_win32.rc )
+  mv src/platform/fa_win32.res "$RCOBJ"
+else
+  windres src/platform/fa_win32.rc -O coff -o "$RCOBJ"
+fi
+
 echo "== compiling + linking fa_slice.exe (SDL2 $(basename "$SDL_ROOT")) =="
 # shellcheck disable=SC2086
 # /subsystem:windows keeps Windows from opening a console ("prompts") window
 # next to the game. main() stays the entry point via mainCRTStartup.
-$CC $CFLAGS $SRC "$SDL_LIB/SDL2.lib" -lwinmm \
+$CC $CFLAGS $SRC "$RCOBJ" "$SDL_LIB/SDL2.lib" -lwinmm \
   -Wl,/subsystem:windows -Wl,/entry:mainCRTStartup -o "$OUT/fa_slice.exe"
 
 cp "$SDL_LIB/SDL2.dll" "$OUT/"

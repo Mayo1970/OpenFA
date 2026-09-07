@@ -45,6 +45,8 @@ int fa_backend_sdl2_create(fa_platform *p, const fa_platform_cfg *cfg)
 
 #include <SDL.h>
 
+#include "../icon/fa_icon_rgba.h"
+
 typedef struct {
     SDL_Window     *win;
     SDL_Renderer   *ren;
@@ -455,6 +457,15 @@ int fa_backend_sdl2_create(fa_platform *p, const fa_platform_cfg *cfg)
                               w * ws, h * ws, wflags);
     if (!s->win) goto fail;
     s->fullscreen = (cfg && cfg->fullscreen) ? 1 : 0;
+
+    /* Taskbar / titlebar icon. On Windows the .exe resource icon (fa_win32.rc)
+     * covers Explorer; this covers the live window on every platform. */
+    {
+        SDL_Surface *ico = SDL_CreateRGBSurfaceWithFormatFrom(
+            (void *)fa_icon_rgba, FA_ICON_W, FA_ICON_H, 32, FA_ICON_W * 4,
+            SDL_PIXELFORMAT_ABGR8888);
+        if (ico) { SDL_SetWindowIcon(s->win, ico); SDL_FreeSurface(ico); }
+    }
 
     /* No SDL_RENDERER_PRESENTVSYNC: the fixed-timestep loop owns cadence
      * and timing must not depend on the refresh. */

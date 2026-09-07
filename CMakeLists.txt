@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 project(openfa C)
 
+if (WIN32)
+  enable_language(RC)
+endif()
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
@@ -89,7 +93,10 @@ endif()
 add_executable(sim_replay tools/sim_replay.c)
 target_link_libraries(sim_replay PRIVATE fa_core)
 
-add_executable(fa_slice tools/fa_slice.c)
+if (WIN32)
+  set(FA_WIN32_RC src/platform/fa_win32.rc)
+endif()
+add_executable(fa_slice tools/fa_slice.c ${FA_WIN32_RC})
 target_link_libraries(fa_slice PRIVATE fa_core)
 if (WIN32)
   # GUI subsystem: no console ("prompts") window opens next to the game
