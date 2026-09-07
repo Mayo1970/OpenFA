@@ -93,12 +93,17 @@ typedef struct fa_entity_rec {
     int   automove;                /* @0x1C                                  */
     int   move_step;               /* @0x1D: px/tick                         */
     int   min_x, min_y, max_x, max_y; /* @0x1F/@0x21/@0x23/@0x25 (-1 = none) */
-    int   move_dir;                /* @0x27: bits 1 L, 2 R, 4 U, 8 D         */
+    int   move_dir;                /* @0x27: generic patrol bits 1 L 2 R 4 U 8 D
+                                   * (rebuilt from bounds). raw[0x27] is instead
+                                   * a 1..10 enum for beh_movplat's platforms.  */
     int   wait_reset, wait;        /* @0x28/@0x29: endpoint pause            */
     int   flip_at_endpoint;        /* @0x2C                                  */
     int   collision_enabled;       /* @0x1A                                  */
     int   collision_bottom_adjust; /* @0x2A                                  */
     int   dx, dy;                  /* movement this tick (for lift carry)    */
+    int   conveyor_dx;            /* belt surface push px/tick, added to
+                                   * carry_dx by fa_entity_ride (ObjNr 82);
+                                   * 0 for a plain lift                     */
     uint64_t anim_cycles;          /* completed wraps of the active range    */
 
     /* classification + generic physics */

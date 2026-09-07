@@ -1131,6 +1131,22 @@ static int menu_move_focus(slice *s, const fa_frame_input *fi)
     return 1;
 }
 
+/* Carry a rider horizontally by `dx` whole px, stopping at walls the same
+ * way its own step would - the exe sweeps the lift carry through 0x432160. */
+static void slice_lift_carry_x(fa_player *p, int dx)
+{
+    if (dx == 0) return;
+    fa_aabb_body bd;
+    memset(&bd, 0, sizeof bd);
+    bd.x  = p->x;
+    bd.y  = p->y;
+    bd.vx = FA_FIX(dx);
+    bd.hw = p->t.body_hw > 0 ? p->t.body_hw : 1;
+    bd.h  = p->t.body_h  > 0 ? p->t.body_h  : 1;
+    fa_collide_move(&bd, 0, p->solid_fn, p->solid_ctx);
+    p->x = bd.x;
+}
+
 static void s_sim(uint64_t tick, const void *input, void *user)
 {
     slice *s = (slice *)user;
@@ -1512,7 +1528,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
              * the feet, preserving the action state. Skipped once the character
              * jumps off. */
             if (on_lift && s->pl.state != FA_PST_JUMP) {
-                s->pl.x += FA_FIX(lift_dx);
+                slice_lift_carry_x(&s->pl, lift_dx);
                 s->pl.y  = FA_FIX(lift_top);
                 if (s->pl.vy > 0) s->pl.vy = 0;
                 s->pl.on_ground = 1;
@@ -1520,7 +1536,7 @@ static void s_sim(uint64_t tick, const void *input, void *user)
                     s->pl.state = (s->pl.vx != 0) ? FA_PST_WALK : FA_PST_STAND;
             }
             if (s->coop && on_lift2 && s->pl2.state != FA_PST_JUMP) {
-                s->pl2.x += FA_FIX(lift_dx2);
+                slice_lift_carry_x(&s->pl2, lift_dx2);
                 s->pl2.y  = FA_FIX(lift_top2);
                 if (s->pl2.vy > 0) s->pl2.vy = 0;
                 s->pl2.on_ground = 1;

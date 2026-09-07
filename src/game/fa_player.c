@@ -286,6 +286,8 @@ void fa_player_tick(fa_player *p, uint32_t in)
         } else {
             p->state = FA_PST_SWAP;
         }
+        /* snowballs already in flight keep moving while the swap is locked */
+        step_snowballs(p);
         finalize(p, jump_raw, swit, fire, 0);
         return;
     }

@@ -851,7 +851,7 @@ int fa_entity_ride(const fa_entity_store *s, int px, int feet_y, int half_w,
             feet_y > top + FA_ENTITY_RIDE_SLOP)
             continue;
         if (lift_top)  *lift_top  = top;
-        if (carry_dx)  *carry_dx  = e->dx;
+        if (carry_dx)  *carry_dx  = e->dx + e->conveyor_dx;
         if (carry_dy)  *carry_dy  = e->dy;
         return 1;
     }

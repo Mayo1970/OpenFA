@@ -564,6 +564,9 @@ static int attack_gate(fa_beh *b, fa_entity_rec *e, const edesc *d)
 
 static const int BLOCK_OBJ[] = { 76, 78, 86, 87 };
 
+/* moving platforms driven by the shared handler 0x416a20 (see beh_movplat) */
+static const int MOVPLAT_OBJ[] = { 2, 200, 201, 202, 210, 220, 230, 231, 232, 233 };
+
 /* sparse leading-edge terrain test: samples along `span` at stride 32 plus
  * the far endpoint (0x414D70 vertical / 0x414DE0 horizontal). */
 static int edge_solid(fa_beh *b, int ax, int ay, int dx, int dy, int span)
@@ -858,7 +861,7 @@ static int beh_paradiso(fa_entity_rec *e, int wrapped, void *ctx)
  */
 enum { BR_IDLE = 0, BR_FUSE = 1, BR_BREAK = 2, BR_GONE = 3 };
 
-#define BR_FUSE_TICKS   30    /* rec[0x74] = 0x1E */
+#define BR_FUSE_TICKS   60    /* rec[0x74] = 0x1E (30) + 0.5 s at 60 Hz */
 #define BR_REGEN_TICKS  120   /* rec[0x74] = 0x78 */
 
 static int beh_broesel(fa_entity_rec *e, int wrapped, void *ctx)
@@ -888,7 +891,10 @@ static int beh_broesel(fa_entity_rec *e, int wrapped, void *ctx)
             x0 = e->x; x1 = e->x + 216; y0 = e->y; y1 = e->y + 78;
         }
         int deck = y0 + e->collision_bottom_adjust;
-        int on = b->px + b->phw >= x0 && b->px - b->phw <= x1 &&
+        /* exe 0x416CB0 tail: the feet POINT in [rec.X, rec.X + w] and at the
+         * deck line - not the whole body box, else brushing the side or
+         * jumping into the underside arms the fuse. */
+        int on = b->px >= x0 && b->px <= x1 &&
                  b->py >= deck - FA_ENTITY_RIDE_SLOP &&
                  b->py <= deck + FA_ENTITY_RIDE_SLOP;
         if (on) {
@@ -1771,13 +1777,19 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
         }
         break;
 
-    case K_FLYROBOT: {                     /* 2-axis accel flight          */
+    case K_FLYROBOT: {                     /* 2-axis eased flight (0x410832) */
+        /* exe: rec[0x9c]/rec[0xa0] velocity, rec[0xa4]/rec[0xa8] a PERSISTENT
+         * +/-0.3 accel per axis. Each tick vel += accel (clamped +/-5), pos +=
+         * vel, then the accel sign flips only when pos reaches a bound - so the
+         * robot eases in and out at each wall instead of running flat out. */
         int ylo = e->min_y != -1 ? e->min_y : (int)(e->bs[BS_FY] >> 16) - 96;
         int yhi = e->max_y != -1 ? e->max_y : (int)(e->bs[BS_FY] >> 16) + 96;
-        if (e->bs[BS_VX] == 0 && e->bs[BS_VY] == 0) { e->bs[BS_VX] = FX_0_3; e->bs[BS_VY] = FX_0_3; }
-        int ax = (e->x <= lo) ? FX_0_3 : (e->x >= hi) ? -FX_0_3 : (e->bs[BS_VX] > 0 ? FX_0_3 : -FX_0_3);
-        int ay = (e->y <= ylo) ? FX_0_3 : (e->y >= yhi) ? -FX_0_3 : (e->bs[BS_VY] > 0 ? FX_0_3 : -FX_0_3);
-        e->bs[BS_VX] += ax; e->bs[BS_VY] += ay;
+        if (e->bs[BS_AF] == 0 && e->bs[BS_N] == 0) {   /* first tick: exe init */
+            e->bs[BS_VX] = 5 * FX; e->bs[BS_VY] = 0;   /* rec[0x9c]=5, rec[0xa0]=0 */
+            e->bs[BS_AF] = FX_0_3; e->bs[BS_N] = FX_0_3;
+        }
+        e->bs[BS_VX] += e->bs[BS_AF];
+        e->bs[BS_VY] += e->bs[BS_N];
         int c5 = 5 * FX;
         if (e->bs[BS_VX] >  c5) e->bs[BS_VX] =  c5;
         if (e->bs[BS_VX] < -c5) e->bs[BS_VX] = -c5;
@@ -1785,6 +1797,10 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
         if (e->bs[BS_VY] < -c5) e->bs[BS_VY] = -c5;
         e->bs[BS_FX] += e->bs[BS_VX]; e->bs[BS_FY] += e->bs[BS_VY];
         e->x = fx_round(e->bs[BS_FX]); e->y = fx_round(e->bs[BS_FY]);
+        if (e->x <= lo)  e->bs[BS_AF] =  FX_0_3;
+        if (e->x >= hi)  e->bs[BS_AF] = -FX_0_3;
+        if (e->y <= ylo) e->bs[BS_N]  =  FX_0_3;
+        if (e->y >= yhi) e->bs[BS_N]  = -FX_0_3;
         e->flip_x = e->bs[BS_VX] > 0;
         break;
     }
@@ -1821,9 +1837,11 @@ static int beh_enemy(fa_entity_rec *e, int wrapped, void *ctx)
                         b->h.sfx(FA_BEH_SFX_ENEMY_ATTACK, e->obj_nr, b->h.user);
                 }
             }
-            /* reverse vx at bounds while diving too */
-            if (e->bs[BS_VX] > 0 && e->x >= hi) e->bs[BS_VX] = -e->bs[BS_VX];
-            if (e->bs[BS_VX] < 0 && e->x <= lo) e->bs[BS_VX] = -e->bs[BS_VX];
+            /* exe (parrot 0x416381 / bee 0x40bfc9): a dive that reaches a
+             * patrol bound CLAMPS X to it and keeps the same vx sign - it does
+             * not bounce mid-dive. */
+            if (e->bs[BS_VX] > 0 && e->x >= hi) { e->x = hi; e->bs[BS_FX] = (int32_t)hi << 16; }
+            if (e->bs[BS_VX] < 0 && e->x <= lo) { e->x = lo; e->bs[BS_FX] = (int32_t)lo << 16; }
             e->flip_x = e->bs[BS_VX] > 0;
         } else {
             patrol_x(e, lo, hi);
@@ -2393,6 +2411,121 @@ static int beh_pipe(fa_entity_rec *e, int wrapped, void *ctx)
     return 0;
 }
 
+/* ================================================================
+ * conveyor belt  (ObjNr 82 misc_fliesband, exe 0x415BB0)
+ * ================================================================
+ * A STATIC DetailGroup-0 platform. rec[0x28] is a bias-128 signed speed:
+ * push = (unsigned)rec[0x28] - 128 px/tick (- = left, + = right). Every
+ * tick each rider (x in [rec.X, rec.X + spriteW], feet at rec.Y +
+ * rec[0x2A], not rising) is shoved that far along X - exe 0x432160, so a
+ * wall still stops the rider (fa_slice's swept lift carry). The belt also
+ * scrolls its own 0..30 sheet by 1 frame/tick (|push| <= 4) or 2 (> 4);
+ * rec[0x2B] (flip_x) is forced from the sign so the painted arrows point
+ * the way the belt pushes.
+ */
+static int beh_conveyor(fa_entity_rec *e, int wrapped, void *ctx)
+{
+    (void)wrapped; (void)ctx;
+    int speed = (int)(unsigned char)e->raw[0x28] - 128;    /* rec[0x28] bias 128 */
+
+    if (!e->bs[BS_INIT]) {
+        e->bs[BS_INIT] = 1;
+        e->automove   = 0;
+        e->is_lift    = 1;
+        e->deck_off   = e->collision_bottom_adjust;
+        e->flip_x     = speed >= 0;
+        e->anim_extra_delay = 255;            /* the belt scroll is driven below */
+        return 0;
+    }
+
+    e->conveyor_dx = speed;                   /* fa_entity_ride adds this to carry */
+
+    int mag  = speed < 0 ? -speed : speed;
+    int span = e->anim_last + 1;              /* rec[0xC] + 1 (0x415C46) */
+    if (span > 1) e->frame = (e->frame + (mag > 4 ? 2 : 1)) % span;
+    return 0;
+}
+
+/* ================================================================
+ * moving platforms - the shared handler 0x416a20
+ * ================================================================
+ * ObjNr 2 (platform), 200-202 / 230-233 (clouds), 210 (raft), 220
+ * (f_platform, the Fabbrica lifts). rec[0x27] is a 1..10 DIRECTION ENUM,
+ * not a bitmask:
+ *   1 L   2 R   4 U   8 D   5 L+U   6 R+U   9 L+D   10 R+D   3/7 static
+ * Each active axis moves rec[0x1D] px/tick toward its bound (minX 0x1F /
+ * minY 0x21 / maxX 0x23 / maxY 0x25). On reaching a bound the mover runs
+ * 0x41B250: hold the shared wait counter rec[0x29] down (reloaded from
+ * rec[0x28]) then flip the mode (^3 on the X axis, ^0xC on the Y axis) and,
+ * if rec[0x2C], the sprite. Both axis movers share the one wait counter, so
+ * a pinned perpendicular axis paces the free one - reproduced here.
+ *
+ * The rider settle bob (rec[0x94]/rec[0x98], exe 0x416B1B) is cosmetic and
+ * not reproduced - same omission as the Paradiso wobble / broesel bob. The
+ * rider carry itself is fa_entity_ride plus the fa_slice swept step.
+ */
+enum { MP_XOR_X = 0x3, MP_XOR_Y = 0xC };
+
+/* 0x41B250: dwell, then flip the mode (and sprite). */
+static int mp_turn(fa_entity_rec *e, int mode, int *wait, int xor_mask)
+{
+    if (*wait > 0) { (*wait)--; return mode; }
+    *wait = e->wait_reset;
+    if (e->flip_at_endpoint) e->flip_x ^= 1;
+    return mode ^ xor_mask;
+}
+
+/* one axis step toward `bound` (dir -1 = toward min, +1 = toward max),
+ * flipping `*mode` through mp_turn when the bound is met. bound < 0 = free. */
+static void mp_axis(int *pos, int bound, int step, int dir, fa_entity_rec *e,
+                    int *mode, int *wait, int xor_mask)
+{
+    if (bound < 0) return;
+    if (dir < 0) { if (*pos > bound) { *pos -= step; if (*pos < bound) *pos = bound; } }
+    else         { if (*pos < bound) { *pos += step; if (*pos > bound) *pos = bound; } }
+    if (dir < 0 ? *pos <= bound : *pos >= bound)
+        *mode = mp_turn(e, *mode, wait, xor_mask);
+}
+
+static int beh_movplat(fa_entity_rec *e, int wrapped, void *ctx)
+{
+    (void)wrapped; (void)ctx;
+
+    if (!e->bs[BS_INIT]) {
+        e->bs[BS_INIT] = 1;
+        e->bs[BS_LS]   = (unsigned char)e->raw[0x27];  /* mode 1..10 (0x27)   */
+        e->bs[BS_KT]   = e->wait;                      /* wait counter (0x29) */
+        e->automove    = 0;                            /* no generic patrol   */
+        e->is_lift     = 1;
+        e->deck_off    = e->collision_bottom_adjust;
+        pd_range(e, 0, 0, 0);                          /* one frame, no anim  */
+        return 0;
+    }
+
+    int mode = e->bs[BS_LS];
+    int step = e->move_step > 0 ? e->move_step : 1;
+    int wait = e->bs[BS_KT];
+    int x = e->x, y = e->y;
+
+    /* pick this tick's movers from the entry mode; each may flip `mode` for
+     * the next tick (the exe dispatches both from the pre-flip mode too). */
+    int xl = (mode == 1 || mode == 5 || mode == 9);
+    int xr = (mode == 2 || mode == 6 || mode == 10);
+    int yu = (mode == 4 || mode == 5 || mode == 6);
+    int yd = (mode == 8 || mode == 9 || mode == 10);
+
+    if (xl) mp_axis(&x, e->min_x, step, -1, e, &mode, &wait, MP_XOR_X);
+    if (xr) mp_axis(&x, e->max_x, step, +1, e, &mode, &wait, MP_XOR_X);
+    if (yu) mp_axis(&y, e->min_y, step, -1, e, &mode, &wait, MP_XOR_Y);
+    if (yd) mp_axis(&y, e->max_y, step, +1, e, &mode, &wait, MP_XOR_Y);
+
+    e->x = x;
+    e->y = y;
+    e->bs[BS_LS] = mode;
+    e->bs[BS_KT] = wait;
+    return 0;
+}
+
 /* ---- public API ---------------------------------------------- */
 
 fa_beh *fa_beh_create(fa_entity_store *store, const fa_beh_hooks *hooks)
@@ -2408,6 +2541,9 @@ fa_beh *fa_beh_create(fa_entity_store *store, const fa_beh_hooks *hooks)
         fa_entity_set_behaviour(store, DESC[i].obj_nr, beh_enemy, b);
     for (unsigned i = 0; i < sizeof BLOCK_OBJ / sizeof BLOCK_OBJ[0]; i++)
         fa_entity_set_behaviour(store, BLOCK_OBJ[i], beh_block, b);
+    for (unsigned i = 0; i < sizeof MOVPLAT_OBJ / sizeof MOVPLAT_OBJ[0]; i++)
+        fa_entity_set_behaviour(store, MOVPLAT_OBJ[i], beh_movplat, b);
+    fa_entity_set_behaviour(store, 82, beh_conveyor, b);   /* conveyor belt    */
     fa_entity_set_behaviour(store, 77, beh_paradiso, b);   /* Paradiso */
     fa_entity_set_behaviour(store, 414, beh_broesel, b);   /* crumbling platform */
     fa_entity_set_behaviour(store, 59, beh_i7, b);         /* boss-arena i7    */
