@@ -1,3 +1,39 @@
 // Windows executable icon. IDI_ICON1 is the lowest id, so Explorer and the
 // taskbar use it as the application icon.
 IDI_ICON1 ICON "../icon/icon.ico"
+
+// Version resource. An unsigned exe with no version block is a classic
+// heuristic malware tell; a filled-in block lowers the AV false-positive score.
+#include <winver.h>
+
+#define FA_VER      0,1,0,0
+#define FA_VER_STR  "0.1.0.0"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     FA_VER
+PRODUCTVERSION  FA_VER
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+FILEFLAGS       0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName",      "OpenFA project"
+            VALUE "FileDescription",  "OpenFA - Kinder & Ferrero: Fresh Adventures engine"
+            VALUE "FileVersion",      FA_VER_STR
+            VALUE "InternalName",     "OpenFA"
+            VALUE "OriginalFilename",  "OpenFA.exe"
+            VALUE "ProductName",       "OpenFA"
+            VALUE "ProductVersion",    FA_VER_STR
+            VALUE "LegalCopyright",    "OpenFA contributors. Game data (c) Ferrero."
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

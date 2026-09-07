@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a self-contained OpenFA-x86_64.AppImage: fa_slice plus its
+# Build a self-contained OpenFA-x86_64.AppImage: the OpenFA binary plus its
 # whole shared-library closure (SDL2, X11, ALSA, PulseAudio, Wayland, ...),
 # minus the parts that must come from the target (glibc core, the GPU stack).
 #
@@ -8,6 +8,10 @@
 # ICON is an .ico or .png for the launcher (default: src/icon/icon.png, else a
 # plain placeholder). Needs: a C compiler,
 # pkg-config, SDL2 dev files, wget, and ImageMagick ("convert").
+#
+# SDL2 is linked statically by default (needs libSDL2.a on the build host - see
+# make-linux-build.sh). Set FA_SDL2_STATIC=0 to bundle libSDL2.so instead; the
+# ldd closure below picks it up either way.
 #
 # RUN THIS ON THE OLDEST GLIBC YOU WANT TO SUPPORT. The AppImage runs on that
 # glibc and every newer one, never older. Ubuntu 20.04 (glibc 2.31) covers
@@ -24,14 +28,14 @@ L=/usr/lib/x86_64-linux-gnu
 command -v convert >/dev/null || { echo "need ImageMagick (convert)"; exit 1; }
 command -v wget    >/dev/null || { echo "need wget"; exit 1; }
 
-echo "== build fa_slice =="
-FA_BUNDLE_SDL=0 ./make-linux-build.sh >/dev/null
-command -v strip >/dev/null && strip "$OUT/fa_slice" || true
+echo "== build OpenFA =="
+FA_SDL2_STATIC="${FA_SDL2_STATIC:-1}" FA_BUNDLE_SDL=0 ./make-linux-build.sh >/dev/null
+command -v strip >/dev/null && strip "$OUT/OpenFA" || true
 
 echo "== assemble $APPDIR =="
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/lib"
-cp "$OUT/fa_slice" "$APPDIR/usr/bin/fa_slice"
+cp "$OUT/OpenFA" "$APPDIR/usr/bin/OpenFA"
 
 # Full ldd closure. Never ship: the loader + core glibc (must match the
 # target kernel) and the GPU stack (must be the target's driver).
@@ -45,14 +49,17 @@ copy_closure() {
         copy_closure "$APPDIR/usr/lib/$bn"
     done
 }
-copy_closure "$APPDIR/usr/bin/fa_slice"
+copy_closure "$APPDIR/usr/bin/OpenFA"
 
-# SDL2 dlopen's some audio/video backends that are not in NEEDED. Add the
-# safe ones (never the GPU libs) and their closures.
+# SDL2 dlopen's its audio and video backends, so they are not in NEEDED. Add
+# the safe ones (never the GPU libs) and their closures. A static SDL2 also
+# dlopen's X11 / Xext / ..., which a shared libSDL2 would have pulled as NEEDED.
 for extra in libasound.so.2 libpulse.so.0 libpulse-simple.so.0 libjack.so.0 \
              libpipewire-0.3.so.0 libsndio.so.7 libwayland-client.so.0 \
              libwayland-cursor.so.0 libwayland-egl.so.1 libxkbcommon.so.0 \
-             libdecor-0.so.0; do
+             libdecor-0.so.0 libX11.so.6 libXext.so.6 libXcursor.so.1 \
+             libXi.so.6 libXrandr.so.2 libXfixes.so.3 libXrender.so.1 \
+             libXss.so.1 libXinerama.so.1 libXxf86vm.so.1; do
     [ -e "$L/$extra" ] || continue
     [ -e "$APPDIR/usr/lib/$extra" ] || cp -L "$L/$extra" "$APPDIR/usr/lib/$extra"
     copy_closure "$APPDIR/usr/lib/$extra"
@@ -63,7 +70,7 @@ cat > "$APPDIR/AppRun" <<'R'
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
 export LD_LIBRARY_PATH="${HERE}/usr/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-exec "${HERE}/usr/bin/fa_slice" "$@"
+exec "${HERE}/usr/bin/OpenFA" "$@"
 R
 chmod +x "$APPDIR/AppRun"
 
@@ -72,7 +79,7 @@ cat > "$APPDIR/openfa.desktop" <<'D'
 Type=Application
 Name=OpenFA
 Comment=Kinder & Ferrero - Fresh Adventures (OpenFA engine)
-Exec=fa_slice
+Exec=OpenFA
 Icon=openfa
 Categories=Game;
 Terminal=false

@@ -1,21 +1,21 @@
 /*
  * fa_slice.c - the desktop vertical-slice entry point.
  *
- *   fa_slice                 open a window; show the title / world-select menu
+ *   OpenFA                   open a window; show the title / world-select menu
  *                            if GData is found, else a test pattern. Click a
  *                            world circle to play it (GIUNGLA = world 1), or
  *                            use keyboard arrows / a controller D-pad and
  *                            confirm with Enter / controller A.
- *   fa_slice --gdata DIR     use this GData directory
- *   fa_slice --world N       skip the menu, boot straight into world N (1..4)
- *   fa_slice --tut           with --world: load the tutorial layout (WeltNt)
- *   fa_slice --end           with --world: boot into the boss arena (WeltNE);
+ *   OpenFA --gdata DIR       use this GData directory
+ *   OpenFA --world N         skip the menu, boot straight into world N (1..4)
+ *   OpenFA --tut             with --world: load the tutorial layout (WeltNt)
+ *   OpenFA --end             with --world: boot into the boss arena (WeltNE);
  *                            in play, all 6 recipe pieces trigger this too
- *   fa_slice --grid          with --world: draw the debug cell overlay
- *   fa_slice --tone          keep the 440 Hz tone on (default: 1 s at start)
- *   fa_slice --silent        no startup tone
- *   fa_slice --frames N      run N frames headless and print stats
- *   fa_slice --seed N        pin the enemy RNG (default: wall clock)
+ *   OpenFA --grid            with --world: draw the debug cell overlay
+ *   OpenFA --tone            keep the 440 Hz tone on (default: 1 s at start)
+ *   OpenFA --silent          no startup tone
+ *   OpenFA --frames N        run N frames headless and print stats
+ *   OpenFA --seed N          pin the enemy RNG (default: wall clock)
  *
  * Menu: mouse, keyboard arrows, or a controller D-pad select a world;
  *       Enter / controller A confirms it.
@@ -1890,6 +1890,38 @@ static int load_world(slice *s, const char *maps, int world,
     return -1;
 }
 
+/*
+ * --custom1: load an arbitrary .W02 as the level. The map carries no art of
+ * its own (the Rayman importer paints every cell from one atlas tile), so the
+ * background pool is the shipped GIUNGLA sheet Welt1.W01.
+ */
+static int load_custom(slice *s, const char *maps, const char *w02_path)
+{
+    const char *variants[] = { "Welt1.W01", "WELT1.W01", "welt1.w01" };
+    char path[600];
+
+    for (unsigned v = 0; v < 3; v++) {
+        snprintf(path, sizeof path, "%s/Maps/%s", maps, variants[v]);
+        if (fa_w01_open_file(&s->bg, path) == 0) break;
+        if (v == 2) return -1;
+    }
+    if (fa_map_load_file(&s->map, w02_path) != 0) {
+        fa_w01_close(&s->bg);
+        return -1;
+    }
+    fa_tileset_free(s->tiles);
+    s->tiles = fa_tileset_build(&s->bg, &s->map);
+    fa_beh_free(s->beh);
+    s->beh = NULL;
+    fa_entity_free(s->ents);
+    s->ents = fa_entity_load(&s->map, maps);
+    if (s->ents)
+        printf("entities: %d placed, %d drawable, %d AOM defs\n",
+               fa_entity_count(s->ents), fa_entity_drawable(s->ents),
+               fa_entity_def_count(s->ents));
+    return 0;
+}
+
 static int dir_has_gdata(const char *dir)
 {
     char p[600];
@@ -2037,9 +2069,11 @@ int main(int argc, char **argv)
     int world = 0, tut = 0, end = 0, grid = 0, tone = 0, silent = 0, mute = 0, vol = -1;
     int show_credits = 0;
     int win_scale = 0, fullscreen = 0, crisp = 0;
+    int debug_keys = 0;             /* -debug: unlock the I/P dev keys */
     double ov_g = 0, ov_j = 0, ov_j2 = 0, ov_r = 0, ov_a = 0;
     int ov_bw = 0, ov_bh = 0, ov_crail = 0, ov_cband = 0, ov_cb = 0;
     long seed_arg = -1;              /* >=0 pins the enemy RNG seed */
+    const char *custom1 = NULL;      /* --custom1 PATH: load this .W02 as the level */
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--frames") && i + 1 < argc)
@@ -2048,6 +2082,8 @@ int main(int argc, char **argv)
             gdata_arg = argv[++i];
         else if (!strcmp(argv[i], "--world") && i + 1 < argc)
             world = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--custom1") && i + 1 < argc)
+            custom1 = argv[++i];
         else if (!strcmp(argv[i], "--tut"))    tut = 1;
         else if (!strcmp(argv[i], "--credits")) show_credits = 1;
         else if (!strcmp(argv[i], "--end"))    end = 1;   /* boot into WeltNE */
@@ -2059,6 +2095,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--seed") && i + 1 < argc) seed_arg = strtol(argv[++i], NULL, 0);
         else if (!strcmp(argv[i], "--scale") && i + 1 < argc) win_scale = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--fullscreen")) fullscreen = 1;
+        else if (!strcmp(argv[i], "-debug") || !strcmp(argv[i], "--debug"))
+            debug_keys = 1;
         else if (!strcmp(argv[i], "--crisp"))      crisp = 1;
         else if (!strcmp(argv[i], "--gravity")   && i + 1 < argc) ov_g  = atof(argv[++i]);
         else if (!strcmp(argv[i], "--jumpvel")   && i + 1 < argc) ov_j  = atof(argv[++i]);
@@ -2071,17 +2109,21 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--camband")   && i + 1 < argc) ov_cband = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--cambias")   && i + 1 < argc) ov_cb = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
-            printf("fa_slice [--gdata DIR] [--world 1..4] [--tut|--end] "
+            printf("OpenFA [--gdata DIR] [--world 1..4] [--tut|--end] "
+                   "[--custom1 FILE.W02] "
                    "[--credits] [--grid] "
                    "[--tone|--silent|--mute] [--vol N] [--frames N]\n"
+                    "  --custom1 FILE.W02: load this map (e.g. from "
+                    "tools/rayimport.py) as the level; uses GIUNGLA art\n"
                     "  no --world: the menu - click a world circle, or use arrows / D-pad\n"
                     "           and Enter / controller A to play it\n"
                    "  --credits: roll the credits screen (Credit1..4.bmp + "
                    "ENDTITLES), then the menu\n"
                    "  a world with tut.ini byte 0 loads its tutorial (WeltNt) "
                    "automatically; --tut forces it\n"
-                    "  in a level: P toggles free-move (no-clip fly; hold A to "
-                    "dash); I skips to this world's boss arena\n"
+                    "  -debug: unlock the dev keys - in a level P toggles "
+                    "free-move (no-clip fly; hold A to dash) and I skips to "
+                    "this world's boss arena\n"
                     "  local co-op: press ENTER or controller START; P2 uses "
                     "I/J/K/L + U/O + T, or the joining controller + LB\n"
                    "  audio: with GData the real mixer plays music + voice "
@@ -2161,6 +2203,26 @@ int main(int argc, char **argv)
         } else {
             printf("credits: Credit1.bmp not found under %s\n", gdata);
         }
+    } else if (custom1) {
+        if (load_custom(&s, gdata, custom1) == 0) {
+            s.have_map = 1;
+            s.world = 1;                 /* GIUNGLA art + music + boss gate */
+            s.in_end = 0;
+            if (s.audio) fa_audio_event(s.audio, FA_SND_MUSIC_W1);
+            fa_camera_init(&s.cam, FA_FB_W, FA_FB_H, s.map.world_w, s.map.world_h);
+            s.use_player = 1;
+            wire_level(&s);
+            load_kids(&s);
+            s.hud = fa_hud_load(gdata);
+            printf("hud: %s\n", s.hud ? "loaded" : "absent");
+            printf("loaded custom level %s: grid %dx%d, world %dx%d px, "
+                   "bg %d frames\n", custom1,
+                   s.map.info.grid_w, s.map.info.grid_h,
+                   s.map.world_w, s.map.world_h, fa_w01_count(&s.bg));
+        } else {
+            printf("could not load custom level '%s' (or Welt1.W01 under %s)\n",
+                   custom1, gdata);
+        }
     } else if (world >= 1 && world <= 4) {
         const char *w1s = end ? "" : slice_world_suffix(gdata, world, tut);
         const char *w2s = end ? "E" : w1s;
@@ -2219,6 +2281,8 @@ int main(int argc, char **argv)
     cfg.integer_scale = crisp ? 1 : 0;   /* default: fill the window/screen */
     cfg.window_scale = win_scale;
     cfg.fullscreen = fullscreen;
+
+    fa_app_set_debug_keys(debug_keys);
 
     fa_app_stats st;
     int rc = fa_app_run(&cfg, &cbs, frames, &st);

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a standalone Linux fa_slice with the SDL2 desktop backend and stage it
+# Build a standalone Linux OpenFA with the SDL2 desktop backend and stage it
 # in dist/ with a README. Run from this folder.
 #
 #   ./make-linux-build.sh
@@ -12,6 +12,15 @@
 #   ($ORIGIN rpath), so the target needs no SDL2 package - just the usual
 #   X11 / ALSA / Wayland runtime libs that SDL2 itself pulls in.
 #
+# FA_SDL2_STATIC=1 ./make-linux-build.sh
+#   links libSDL2.a into the binary, so nothing SDL ships beside it. SDL2 still
+#   dlopen's the system X11 / Wayland / ALSA / PulseAudio libs at run time.
+#   Needs a static SDL2 archive: distro package (Fedora SDL2-static, Arch has
+#   none) or built from source:
+#     cmake -S SDL2-src -B b -DSDL_STATIC=ON -DSDL_SHARED=OFF && cmake --build b
+#   Point at it with SDL2_STATIC_LIB=/path/to/libSDL2.a if pkg-config's libdir
+#   does not hold one.
+#
 # The binary (and a bundled libSDL2) only run on a glibc AT LEAST as new as
 # the build host's. Build on the OLDEST distro you need to support.
 set -euo pipefail
@@ -20,14 +29,27 @@ cd "$(dirname "$0")"
 CC="${CC:-cc}"
 OUT=dist
 BUNDLE="${FA_BUNDLE_SDL:-0}"
+STATIC="${FA_SDL2_STATIC:-0}"
 
 # SDL2 compile/link flags from pkg-config, else sdl2-config.
 if pkg-config --exists sdl2 2>/dev/null; then
   SDL_CFLAGS=$(pkg-config --cflags sdl2)
-  SDL_LIBS=$(pkg-config --libs sdl2)
+  if [ "$STATIC" = "1" ]; then
+    a="${SDL2_STATIC_LIB:-$(pkg-config --variable=libdir sdl2)/libSDL2.a}"
+    [ -f "$a" ] || { echo "no static SDL2 archive at $a (set SDL2_STATIC_LIB)"; exit 1; }
+    # the .a in place of -lSDL2, plus SDL2's private deps (X11, dl, ...).
+    SDL_LIBS="$a $(pkg-config --libs-only-other --libs-only-L --static sdl2) \
+$(pkg-config --libs-only-l --static sdl2 | sed 's/-lSDL2\b//g')"
+  else
+    SDL_LIBS=$(pkg-config --libs sdl2)
+  fi
 elif command -v sdl2-config >/dev/null 2>&1; then
   SDL_CFLAGS=$(sdl2-config --cflags)
-  SDL_LIBS=$(sdl2-config --libs)
+  if [ "$STATIC" = "1" ]; then
+    SDL_LIBS=$(sdl2-config --static-libs)
+  else
+    SDL_LIBS=$(sdl2-config --libs)
+  fi
 else
   echo "SDL2 development files not found (pkg-config sdl2 / sdl2-config)." >&2
   echo "  Debian/Ubuntu: sudo apt install libsdl2-dev" >&2
@@ -35,6 +57,9 @@ else
   echo "  Arch:          sudo pacman -S sdl2" >&2
   exit 1
 fi
+
+[ "$BUNDLE" = "1" ] && [ "$STATIC" = "1" ] && \
+  { echo "FA_BUNDLE_SDL and FA_SDL2_STATIC are mutually exclusive"; exit 1; }
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -60,14 +85,14 @@ src/platform/fa_time_posix.c src/platform/fa_paths_posix.c
 LDEXTRA=""
 [ "$BUNDLE" = "1" ] && LDEXTRA="-Wl,-rpath,\$ORIGIN"
 
-echo "== compiling + linking fa_slice (SDL2 $(pkg-config --modversion sdl2 2>/dev/null || echo '?')) =="
+echo "== compiling + linking OpenFA (SDL2 $(pkg-config --modversion sdl2 2>/dev/null || echo '?')) =="
 # shellcheck disable=SC2086
-$CC $CFLAGS $SRC $SDL_LIBS -lm $LDEXTRA -o "$OUT/fa_slice"
-command -v strip >/dev/null && strip "$OUT/fa_slice" || true
+$CC $CFLAGS $SRC $SDL_LIBS -lm $LDEXTRA -o "$OUT/OpenFA"
+command -v strip >/dev/null && strip "$OUT/OpenFA" || true
 
 if [ "$BUNDLE" = "1" ]; then
   so=$("$CC" -print-file-name=libSDL2-2.0.so.0 2>/dev/null)
-  [ -f "$so" ] || so=$(ldd "$OUT/fa_slice" | sed -n 's/.*=> \(.*libSDL2-2\.0\.so\.0\) .*/\1/p' | head -1)
+  [ -f "$so" ] || so=$(ldd "$OUT/OpenFA" | sed -n 's/.*=> \(.*libSDL2-2\.0\.so\.0\) .*/\1/p' | head -1)
   if [ -f "$so" ]; then
     cp -L "$so" "$OUT/libSDL2-2.0.so.0"
     command -v strip >/dev/null && strip "$OUT/libSDL2-2.0.so.0" || true
@@ -86,15 +111,15 @@ the engine; it reads your GData tree at run time.
 
 RUN
 ---
-Put your GData folder next to the fa_slice binary:
+Put your GData folder next to the OpenFA binary:
 
-    fa_slice
+    OpenFA
     GData/Pics/StartBG.bmp
     GData/Maps/...
     GData/Animation/...
 
-Then:  ./fa_slice
-Or point at it:  ./fa_slice --gdata /path/to/GData
+Then:  ./OpenFA
+Or point at it:  ./OpenFA --gdata /path/to/GData
 
 GData lookup order: --gdata DIR, then <binary dir>/GData, then ./GData.
 
@@ -112,10 +137,10 @@ CONTROLS
     Level   arrows walk   A jump   S throw   D switch character   Esc quits
     Enter / START  join local co-op (2nd character)
 
-    ./fa_slice --world N     boot straight into world N (1..4)
-    ./fa_slice --scale N     open the window at N x 800x600
-    ./fa_slice --fullscreen
-    ./fa_slice --frames N    run headless, print stats
+    ./OpenFA --world N     boot straight into world N (1..4)
+    ./OpenFA --scale N     open the window at N x 800x600
+    ./OpenFA --fullscreen
+    ./OpenFA --frames N    run headless, print stats
 EOF
 
 if [ "$BUNDLE" = "1" ] && [ -f "$OUT/libSDL2-2.0.so.0" ]; then
@@ -131,12 +156,26 @@ https://www.libsdl.org/license.php
 EOF
 fi
 
+if [ "$STATIC" = "1" ]; then
+  cat >> "$OUT/README.txt" <<'EOF'
+
+STATIC SDL2
+-----------
+SDL2 is linked into OpenFA, so nothing SDL ships beside it. SDL2 still
+loads the system X11 / Wayland / ALSA / PulseAudio libraries at run time
+(present on any desktop). SDL2 is (c) Sam Lantinga, zlib license -
+https://www.libsdl.org/license.php
+EOF
+fi
+
 echo "== headless smoke test (no display here -> null backend) =="
-"./$OUT/fa_slice" --frames 3 || true
+"./$OUT/OpenFA" --frames 3 || true
 
 echo
 echo "staged in $OUT/ :"
 ls -la "$OUT"
 echo
+command -v sha256sum >/dev/null && sha256sum "$OUT/OpenFA"
+echo
 echo "Give the whole $OUT/ folder to the player. They drop GData beside"
-echo "fa_slice and run it."
+echo "OpenFA and run it."

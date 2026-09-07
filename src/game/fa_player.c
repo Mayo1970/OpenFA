@@ -27,6 +27,7 @@ const fa_player_tuning FA_PLAYER_DEFAULT_TUNING = {
     /* crouch_max     */ FA_FIX(1),
     /* floor_y        */ FA_FIX(480),
     /* glide_max_vy   */ (FA_FIX(15)) / 10,    /* 1.5 px/tick slow sink (Pinguì) */
+    /* glide_ticks    */ 120,                  /* 2x the oracle (0x4E0B38 = 0x3C), one glide per airtime */
 
     /* climb_speed    */ FA_FIX(3),            /* 3 px/tick on a ladder             */
     /* climb_jump_vx  */ FA_FIX(5),            /* 0x5000 hop-off                     */
@@ -81,6 +82,7 @@ void fa_player_init(fa_player *p, int spawn_x, int spawn_y)
     p->facing = FA_FACE_RIGHT;
     p->state = FA_PST_STAND;
     p->on_ground = 1;
+    p->glide_left = p->t.glide_ticks;
     p->idle_timer = p->t.idle_delay;
     p->rng_state = 0x9e3779b9u ^ (uint32_t)(spawn_x * 2654435761u + spawn_y);
     if (p->rng_state == 0) p->rng_state = 1;
@@ -534,11 +536,27 @@ void fa_player_tick(fa_player *p, uint32_t in)
     }
 
     /* Pinguì glide: past the apex, JUMP + a direction caps the descent so
-     * the Pinguì sinks slowly and drifts far. No lift. Character 1 cannot. */
-    p->gliding = (!p->on_ground && p->character == 0 && jump && dir != 0 &&
-                  p->vy > 0);
-    if (p->gliding && p->vy > t->glide_max_vy)
-        p->vy = t->glide_max_vy;
+     * the Pinguì sinks slowly and drifts far. No lift. Character 1 cannot.
+     * The oracle gives a fixed budget per airtime (0x4E0B38 = 0x3C on entry,
+     * one decrement per tick in glide state 0x0B) and sets it to -1 on exit,
+     * so it is one glide per jump - releasing JUMP/the direction spends it. */
+    if (p->on_ground) {
+        p->glide_left = t->glide_ticks;
+        p->glide_spent = 0;
+    }
+    if (!p->on_ground && p->character == 0 && jump && dir != 0 && p->vy > 0 &&
+        !p->glide_spent && p->glide_left > 0) {
+        p->gliding = 1;
+        if (p->vy > t->glide_max_vy)
+            p->vy = t->glide_max_vy;
+        if (--p->glide_left <= 0) {
+            p->glide_left = 0;
+            p->glide_spent = 1;
+        }
+    } else {
+        if (p->gliding) p->glide_spent = 1;   /* glided then released: no re-glide */
+        p->gliding = 0;
+    }
 
     /* integrate + resolve. With a map probe this is a swept AABB against
      * fa_collide: solid tiles stop every axis, one-way platforms stop a

@@ -22,7 +22,10 @@
  *     - GLIDE (Pinguì only): once past the jump apex (vy > 0), holding JUMP
  *       plus a direction caps the descent at glide_max_vy - Pinguì sinks
  *       slowly and drifts far. No height gain. Releasing JUMP or the
- *       direction, or landing, ends it. Character 1 cannot glide.
+ *       direction, or landing, ends it. The glide has a fixed budget of
+ *       glide_ticks per airtime and does not re-arm until the next landing
+ *       (oracle: 0x4E0B38 = 0x3C on entry, one decrement per tick, -1 on
+ *       exit; the port doubles the budget). Character 1 cannot glide.
  *   GRAVITY = 0.6 px/tick^2, TERMINAL fall = 20.0 px/tick: the engine
  *   integrates entity position as float and does `vy += 0.6` each tick clamped
  *   to +20.0 in a shared fall step (`fadd ds:0x452254` in ~18 entity state
@@ -92,6 +95,7 @@ typedef struct fa_player_tuning {
     int32_t crouch_max;     /* horizontal cap while crouching                 */
     int32_t floor_y;        /* flat-floor Y when no ground probe is set       */
     int32_t glide_max_vy;   /* descent cap while Pinguì glides (slow)         */
+    int      glide_ticks;   /* glide budget per airtime (oracle 0x4E0B38 = 0x3C; port uses 2x) */
 
     int32_t climb_speed;    /* px/tick on a ladder, any direction (3)         */
     int32_t climb_jump_vx;  /* vx when JUMP leaves a ladder with a dir held (5)*/
@@ -160,6 +164,8 @@ typedef struct fa_player {
     int      on_ground;
     int      character;      /* 0 or 1 - the active character */
     int      gliding;        /* 1 while the Pinguì glide is active this tick */
+    int      glide_left;     /* glide ticks left this airtime (exe 0x4E0B38) */
+    int      glide_spent;    /* 1 = glide used up, no re-glide until landing */
 
     int      jump_hold;      /* ticks left in the hold-higher jump window */
     int      jump_held_prev;

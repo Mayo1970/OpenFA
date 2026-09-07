@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
-# Build a standalone Windows fa_slice.exe with the SDL2 desktop backend and
-# stage it in dist/ together with SDL2.dll and a README. Run from this folder.
+# Build a standalone Windows OpenFA.exe with the SDL2 desktop backend and
+# stage it in dist/. Run from this folder.
+#
+# Set FA_SIGN_PFX (and FA_SIGN_PW) to an Authenticode cert to sign the exe.
+# An unsigned, no-reputation binary is the main reason AV engines flag it.
 #
 #   ./make-windows-build.sh [SDL2_ROOT] [SDL2_LIBDIR]
 #
-# SDL2_ROOT   holds include/SDL.h        (default: the ioq3 thirdparty copy)
-# SDL2_LIBDIR holds SDL2.lib + SDL2.dll  (default: <root>/../libs/win64)
+# SDL2_ROOT   holds include/SDL.h                 (default: the ioq3 thirdparty copy)
+# SDL2_LIBDIR holds the SDL2 link libs + SDL2.dll (default: <root>/../libs/win64)
+#
+# Static link (no SDL2.dll shipped): if SDL_LIBDIR holds a real static lib
+# (SDL2-static.lib or libSDL2.a), it is linked and no DLL is staged. Build one
+# once from SDL2 source: cmake -B build -DSDL_STATIC=ON -DSDL_SHARED=OFF && cmake --build build
+# then copy build/SDL2-static.lib (or libSDL2.a) into SDL_LIBDIR.
+# Otherwise it falls back to the import lib + SDL2.dll beside the exe.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -15,8 +24,17 @@ CC="${CC:-clang}"
 OUT=dist
 
 [ -f "$SDL_ROOT/include/SDL.h" ] || { echo "no SDL.h under $SDL_ROOT/include"; exit 1; }
-[ -f "$SDL_LIB/SDL2.lib" ]       || { echo "no SDL2.lib under $SDL_LIB"; exit 1; }
-[ -f "$SDL_LIB/SDL2.dll" ]       || { echo "no SDL2.dll under $SDL_LIB"; exit 1; }
+
+# Pick the SDL2 link mode. Static wins if a real static archive is present.
+SDL_STATIC=0
+if   [ -f "$SDL_LIB/SDL2-static.lib" ]; then SDL_LINK="$SDL_LIB/SDL2-static.lib"; SDL_STATIC=1
+elif [ -f "$SDL_LIB/libSDL2.a" ];       then SDL_LINK="$SDL_LIB/libSDL2.a";       SDL_STATIC=1
+elif [ -f "$SDL_LIB/SDL2.lib" ];        then SDL_LINK="$SDL_LIB/SDL2.lib"
+else echo "no SDL2 link lib under $SDL_LIB"; exit 1
+fi
+if [ "$SDL_STATIC" -eq 0 ]; then
+  [ -f "$SDL_LIB/SDL2.dll" ] || { echo "shared link needs SDL2.dll under $SDL_LIB"; exit 1; }
+fi
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -51,22 +69,59 @@ else
   windres src/platform/fa_win32.rc -O coff -o "$RCOBJ"
 fi
 
-echo "== compiling + linking fa_slice.exe (SDL2 $(basename "$SDL_ROOT")) =="
+# Static SDL2 pulls in its Win32 backends directly, so the exe must link the
+# system libs SDL2.dll would otherwise carry. Harmless in the shared case.
+SDL_SYSLIBS=""
+if [ "$SDL_STATIC" -eq 1 ]; then
+  SDL_SYSLIBS="-luser32 -lgdi32 -lwinmm -limm32 -lole32 -loleaut32 -lversion \
+-luuid -ladvapi32 -lsetupapi -lshell32 -ldinput8"
+fi
+
+if [ "$SDL_STATIC" -eq 1 ]; then
+  MODE="static, no DLL"; SDL_CRTFIX="-Wl,/nodefaultlib:libcmt"
+else
+  MODE="shared, SDL2.dll"; SDL_CRTFIX=""
+fi
+echo "== compiling + linking OpenFA.exe (SDL2 $(basename "$SDL_ROOT"), $MODE) =="
 # shellcheck disable=SC2086
 # /subsystem:windows keeps Windows from opening a console ("prompts") window
 # next to the game. main() stays the entry point via mainCRTStartup.
-$CC $CFLAGS $SRC "$RCOBJ" "$SDL_LIB/SDL2.lib" -lwinmm \
-  -Wl,/subsystem:windows -Wl,/entry:mainCRTStartup -o "$OUT/fa_slice.exe"
+# nodefaultlib:libcmt: static SDL2 is built against the dynamic CRT (MSVCRT);
+# drop the static-CRT default so both sides share one CRT heap.
+$CC $CFLAGS $SRC "$RCOBJ" "$SDL_LINK" -lwinmm $SDL_SYSLIBS \
+  -Wl,/subsystem:windows -Wl,/entry:mainCRTStartup $SDL_CRTFIX -o "$OUT/OpenFA.exe"
 
-cp "$SDL_LIB/SDL2.dll" "$OUT/"
+# Authenticode sign if a cert is configured. signtool ships with the Windows SDK;
+# osslsigncode is the cross-platform fallback. TS is the RFC3161 timestamp URL.
+TS=http://timestamp.digicert.com
+if [ -n "${FA_SIGN_PFX:-}" ]; then
+  echo "== signing OpenFA.exe =="
+  if command -v signtool >/dev/null; then
+    pw=(); [ -n "${FA_SIGN_PW:-}" ] && pw=(//p "$FA_SIGN_PW")
+    signtool sign //f "$FA_SIGN_PFX" "${pw[@]}" //fd sha256 //tr "$TS" //td sha256 "$OUT/OpenFA.exe"
+  elif command -v osslsigncode >/dev/null; then
+    pw=(); [ -n "${FA_SIGN_PW:-}" ] && pw=(-pass "$FA_SIGN_PW")
+    osslsigncode sign -pkcs12 "$FA_SIGN_PFX" "${pw[@]}" -h sha256 -ts "$TS" \
+      -in "$OUT/OpenFA.exe" -out "$OUT/OpenFA-signed.exe"
+    mv "$OUT/OpenFA-signed.exe" "$OUT/OpenFA.exe"
+  else
+    echo "   FA_SIGN_PFX set but no signtool / osslsigncode found - shipping unsigned" >&2
+  fi
+fi
+
+[ "$SDL_STATIC" -eq 1 ] || cp "$SDL_LIB/SDL2.dll" "$OUT/"
 cp dist-README.txt "$OUT/README.txt" 2>/dev/null || true
 
 echo "== headless smoke test (no display here -> null backend) =="
-"./$OUT/fa_slice.exe" --frames 3 || true
+"./$OUT/OpenFA.exe" --frames 3 || true
 
 echo
 echo "staged in $OUT/ :"
 ls -la "$OUT"
 echo
-echo "Give the owner the whole $OUT/ folder. They drop GData beside fa_slice.exe"
+if command -v sha256sum >/dev/null; then sha256sum "$OUT/OpenFA.exe"
+elif command -v certutil >/dev/null; then certutil -hashfile "$OUT/OpenFA.exe" SHA256
+fi
+echo
+echo "Give the owner the whole $OUT/ folder. They drop GData beside OpenFA.exe"
 echo "(or a Maps/ folder under GData/) and double-click it."

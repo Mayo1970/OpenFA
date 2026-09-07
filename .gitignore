@@ -1,11 +1,14 @@
 _build/
 dist/
+.res
 *.o
 *.a
 *.exe
 *.replay
+__pycache__/
+*.pyc
 
-# never track game assets (RRR-100)
+# never track game assets
 GData/
 Data/
 

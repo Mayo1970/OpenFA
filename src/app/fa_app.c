@@ -80,6 +80,10 @@ static uint32_t keyboard2_actions_of(const fa_input *in)
     return m;
 }
 
+/* I/P debug keys (free-move, boss skip) only work when booted with -debug. */
+static int g_debug_keys = 0;
+void fa_app_set_debug_keys(int on) { g_debug_keys = on ? 1 : 0; }
+
 int fa_app_run(const fa_platform_cfg *cfg, const fa_app_cbs *cbs,
                long max_frames, fa_app_stats *stats)
 {
@@ -163,8 +167,10 @@ int fa_app_run(const fa_platform_cfg *cfg, const fa_app_cbs *cbs,
             if (fa_input_button_pressed(&in, b)) carry_pressed |= (1u << b);
         }
         actx.fi.btn_pressed = carry_pressed;
-        if (fa_input_key_pressed(&in, FA_DIK_P)) carry_dbg |= FA_DBG_FREEMOVE;
-        if (fa_input_key_pressed(&in, FA_DIK_I)) carry_dbg |= FA_DBG_BOSS;
+        if (g_debug_keys) {
+            if (fa_input_key_pressed(&in, FA_DIK_P)) carry_dbg |= FA_DBG_FREEMOVE;
+            if (fa_input_key_pressed(&in, FA_DIK_I)) carry_dbg |= FA_DBG_BOSS;
+        }
         actx.fi.dbg_pressed = carry_dbg;
 
         /* name-entry text: printable key down-edges + the three edit keys */

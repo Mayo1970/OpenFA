@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install a built fa_slice into a prefix: the binary, a .desktop entry and the
+# Install a built OpenFA into a prefix: the binary, a .desktop entry and the
 # full set of hicolor icon sizes. Run make-linux-build.sh first.
 #
 #   ./make-linux-install.sh [PREFIX]
@@ -8,26 +8,26 @@
 # /usr/local for a system install (run with sudo).
 #
 # Uninstall: delete
-#   $PREFIX/bin/fa_slice
+#   $PREFIX/bin/OpenFA
 #   $PREFIX/share/applications/openfa.desktop
 #   $PREFIX/share/icons/hicolor/*/apps/openfa.png
 set -euo pipefail
 cd "$(dirname "$0")"
 
 PREFIX="${1:-$HOME/.local}"
-BIN="dist/fa_slice"
+BIN="dist/OpenFA"
 
 [ -x "$BIN" ] || { echo "no $BIN - run ./make-linux-build.sh first"; exit 1; }
 
 echo "== install into $PREFIX =="
-install -Dm755 "$BIN" "$PREFIX/bin/fa_slice"
+install -Dm755 "$BIN" "$PREFIX/bin/OpenFA"
 
 install -Dm644 /dev/stdin "$PREFIX/share/applications/openfa.desktop" <<'D'
 [Desktop Entry]
 Type=Application
 Name=OpenFA
 Comment=Kinder & Ferrero - Fresh Adventures (OpenFA engine)
-Exec=fa_slice
+Exec=OpenFA
 Icon=openfa
 Categories=Game;
 Terminal=false
@@ -50,7 +50,7 @@ fi
 
 echo
 echo "installed:"
-echo "  $PREFIX/bin/fa_slice"
+echo "  $PREFIX/bin/OpenFA"
 echo "  $PREFIX/share/applications/openfa.desktop"
 echo "  $PREFIX/share/icons/hicolor/*/apps/openfa.png"
 echo

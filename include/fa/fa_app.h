@@ -134,6 +134,9 @@ typedef struct fa_app_stats {
 int fa_app_run(const struct fa_platform_cfg *cfg, const fa_app_cbs *cbs,
                long max_frames, fa_app_stats *stats);
 
+/* Enable the I/P dev keys (boss skip, free-move). Off unless booted -debug. */
+void fa_app_set_debug_keys(int on);
+
 #ifdef __cplusplus
 }
 #endif
